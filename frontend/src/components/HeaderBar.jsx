@@ -1,3 +1,4 @@
+
 import { LogOut, Settings, Package } from "lucide-react";
 
 export default function HeaderBar({ username, onLogout, onOpenPrompts }) {
@@ -12,7 +13,9 @@ export default function HeaderBar({ username, onLogout, onOpenPrompts }) {
             <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
               WB Характеристики
             </h1>
-            <p className="text-sm text-gray-600">AI генератор и валидатор Wildberries</p>
+            <p className="text-sm text-gray-600">
+              AI генератор и валидатор Wildberries
+            </p>
           </div>
         </div>
 

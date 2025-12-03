@@ -24,7 +24,9 @@ async function request(path, { method = "GET", token, body, headers } = {}) {
 }
 
 export const api = {
-  login: (payload) => request("/api/auth/login", { method: "POST", body: payload }),
+  login: (payload) =>
+    request("/api/auth/auth/login", { method: "POST", body: payload }),
+
   process: (payload, token) =>
     fetch(`${API_BASE}/api/process`, {
       method: "POST",
@@ -34,14 +36,29 @@ export const api = {
       },
       body: JSON.stringify(payload),
     }),
+
+  getCurrentCard: (token, payload) =>
+    request("/api/process/get_current_card", {
+      method: "POST",
+      token,
+      body: payload, // { article: "..." }
+    }),
+
   // prompts
   getPrompts: (token) => request("/api/admin/prompts", { token }),
   createPrompt: (token, payload) =>
     request("/api/admin/prompts", { method: "POST", token, body: payload }),
   updatePrompt: (token, promptType, payload) =>
-    request(`/api/admin/prompts/${promptType}`, { method: "PUT", token, body: payload }),
+    request(`/api/admin/prompts/${promptType}`, {
+      method: "PUT",
+      token,
+      body: payload,
+    }),
   deletePrompt: (token, promptType) =>
-    request(`/api/admin/prompts/${promptType}`, { method: "DELETE", token }),
+    request(`/api/admin/prompts/${promptType}`, {
+      method: "DELETE",
+      token,
+    }),
   previewPrompt: (token, promptType) =>
     request(`/api/admin/prompts/${promptType}/preview`, { token }),
   versionsPrompt: (token, promptType) =>
