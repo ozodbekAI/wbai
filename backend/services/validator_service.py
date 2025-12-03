@@ -12,7 +12,6 @@ from services.promnt_loader import PromptLoaderService
 class ValidatorService:
     
     def __init__(self):
-        # Proxy bilan yoki proxy'siz client yaratish
         if settings.USE_PROXY and settings.PROXY_URL:
             http_client = httpx.Client(
                 proxies={
@@ -55,9 +54,8 @@ class ValidatorService:
         
         current_charcs = initial_charcs
         iteration = 1
-        consecutive_failures = 0  # Счетчик подряд идущих неудач
+        consecutive_failures = 0  
         
-        # Load prompts from DB
         try:
             with get_db() as db:
                 prompt_loader = PromptLoaderService(db)
@@ -69,7 +67,6 @@ class ValidatorService:
             refiner_prompt = self._get_fallback_refiner_prompt()
         
         while iteration <= settings.MAX_ITERATIONS:
-            log(f"✓ Iteration {iteration}: validating...")
             time.sleep(1)
             
             try:
@@ -112,8 +109,6 @@ class ValidatorService:
                     break
 
                 if iteration < settings.MAX_ITERATIONS:
-                    log(f"🔄 Trying to improve, iteration {iteration + 1}...")
-                    log(f"💡 Fix: {fix_prompt[:150]}...")
                     
                     time.sleep(2)
                     
@@ -244,7 +239,6 @@ class ValidatorService:
         if "characteristics" not in result:
             raise ValueError("Refiner result missing 'characteristics'")
         
-        # ✅ FIX: Normalize values to arrays
         characteristics = result["characteristics"]
         for char in characteristics:
             if "value" in char:
@@ -273,7 +267,6 @@ class ValidatorService:
             result.append({
                 "id": c.get("charcID"),
                 "name": c.get("name"),
-                "maxCount": c.get("maxCount"),
                 "required": c.get("required", False),
             })
         return result

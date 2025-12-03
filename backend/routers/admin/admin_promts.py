@@ -61,7 +61,6 @@ async def get_all_prompts(
     db: Session = Depends(get_db_dependency),
     current_user: dict = Depends(get_current_user)
 ):
-    """Получить все промпты"""
     repo = PromptRepository(db)
     prompts = repo.get_all_prompts()
     
@@ -87,7 +86,6 @@ async def get_prompt(
     db: Session = Depends(get_db_dependency),
     current_user: dict = Depends(get_current_user)
 ):
-    """Получить конкретный промпт"""
     repo = PromptRepository(db)
     prompt = repo.get_active_prompt(prompt_type)
     
@@ -113,7 +111,6 @@ async def preview_full_prompt(
     db: Session = Depends(get_db_dependency),
     current_user: dict = Depends(get_current_user)
 ):
-    """Предпросмотр полного промпта (как он будет передан в OpenAI)"""
     try:
         prompt_loader = PromptLoaderService(db)
         full_prompt = prompt_loader.get_full_prompt(prompt_type)
@@ -148,7 +145,6 @@ async def create_prompt(
     db: Session = Depends(get_db_dependency),
     current_user: dict = Depends(get_current_user)
 ):
-    """Создать новый промпт"""
     repo = PromptRepository(db)
     
     try:
@@ -181,7 +177,6 @@ async def update_prompt(
     db: Session = Depends(get_db_dependency),
     current_user: dict = Depends(get_current_user)
 ):
-    """Обновить существующий промпт"""
     repo = PromptRepository(db)
     
     try:
@@ -216,7 +211,6 @@ async def delete_prompt(
     db: Session = Depends(get_db_dependency),
     current_user: dict = Depends(get_current_user)
 ):
-    """Деактивировать промпт (soft delete)"""
     repo = PromptRepository(db)
     prompt = repo.get_active_prompt(prompt_type)
     
@@ -235,7 +229,6 @@ async def get_prompt_versions(
     db: Session = Depends(get_db_dependency),
     current_user: dict = Depends(get_current_user)
 ):
-    """Получить историю версий промпта"""
     repo = PromptRepository(db)
     versions = repo.get_prompt_versions(prompt_type)
     
@@ -255,7 +248,6 @@ async def get_prompt_versions(
 async def get_available_prompt_types(
     current_user: dict = Depends(get_current_user)
 ):
-    """Получить список доступных типов промптов"""
     return {
         "types": [
             {

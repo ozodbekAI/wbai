@@ -29,5 +29,16 @@ class WBRepository:
         if data.get("error"):
             raise ValueError(f"WB API error: {data.get('errorText')}")
         
-        return data.get("data", [])
+        raw_charcs = data.get("data", [])
+
+        filtered = [
+            {
+                "charcID": item["charcID"],
+                "name": item["name"],
+                "required": item["required"],
+            }
+            for item in raw_charcs
+        ]
+
+        return filtered
 

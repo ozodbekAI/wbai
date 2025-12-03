@@ -4,9 +4,9 @@ from core.security import (
     get_password_hash,
     create_access_token,
     decode_token,
-    authenticate_user,
 )
 from core.dependencies import get_current_user
+
 
 __all__ = [
     "settings",
@@ -14,6 +14,5 @@ __all__ = [
     "get_password_hash",
     "create_access_token",
     "decode_token",
-    "authenticate_user",
     "get_current_user",
 ]

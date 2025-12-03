@@ -6,35 +6,76 @@ from services.pipeline_service import PipelineService
 
 
 class ProcessController:
-    
     def __init__(self):
         self.pipeline_service = PipelineService()
-    
+
     async def process_stream(self, article: str) -> AsyncGenerator[str, None]:
-        logs = []
-        
+        """
+        SSE stream:
+        - loglarni darhol yuboradi: {"type": "log", "message": "..."}
+        - yakunda natijani yuboradi: {"type": "result", "payload": {...}}
+        - oxirida: data: [DONE]
+        """
+        queue: asyncio.Queue[str] = asyncio.Queue()
+
+        # Pipeline ichiga beriladigan callback
         def log_callback(msg: str):
-            logs.append(msg)
-        
-        try:
-            result = await asyncio.to_thread(
-                self.pipeline_service.process_article,
-                article=article,
-                log_callback=log_callback
-            )
-            
-            # ✅ LOG: Natijani JSON formatda chiqarish
-            print("=" * 80)
-            print("📤 BACKEND NATIJA (JSON):")
-            print(json.dumps(result, ensure_ascii=False, indent=2))
-            print("=" * 80)
-            
-            for log in logs:
-                yield f"data: {json.dumps({'type': 'log', 'message': log})}\n\n"
-                await asyncio.sleep(0.01)
-            
-            yield f"data: {json.dumps({'type': 'result', 'data': result}, ensure_ascii=False)}\n\n"
-            
-        except Exception as e:
-            print(f"❌ ERROR: {str(e)}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            try:
+                queue.put_nowait(
+                    json.dumps(
+                        {"type": "log", "message": msg},
+                        ensure_ascii=False,
+                    )
+                )
+            except RuntimeError:
+                # queue yopilayotgan bo'lsa, pipeline yiqilmasin
+                pass
+
+        async def run_pipeline():
+            try:
+                # sync pipeline'ni background thread’da ishlatamiz
+                result = await asyncio.to_thread(
+                    self.pipeline_service.process_article,
+                    article=article,
+                    log_callback=log_callback,
+                )
+
+                # Yakuniy natija – FRONTEND KUTGAN FORMATDA
+                await queue.put(
+                    json.dumps(
+                        {"type": "result", "payload": result},
+                        ensure_ascii=False,
+                    )
+                )
+            except Exception as e:
+                # SSE orqali xato jo'natamiz
+                await queue.put(
+                    json.dumps(
+                        {"type": "error", "message": str(e)},
+                        ensure_ascii=False,
+                    )
+                )
+            finally:
+                # Stream yakuni
+                await queue.put("[DONE]")
+
+        # Pipeline taskini fon’da ishga tushiramiz
+        asyncio.create_task(run_pipeline())
+
+        # Navbat bilan queue'dan olib SSE blok qilib yuboramiz
+        while True:
+            data = await queue.get()
+
+            if data == "[DONE]":
+                # DONE event
+                yield "data: [DONE]\n\n"
+                break
+
+            # Oddiy event
+            yield f"data: {data}\n\n"
+
+    async def fetch_current_card(self, article: str) -> dict | None:
+        return await asyncio.to_thread(
+            self.pipeline_service.get_current_card,
+            article=article,
+        )

@@ -24,6 +24,6 @@ class ProcessResponse(BaseModel):
 
 
 class LogMessage(BaseModel):
-    type: str  # "log", "result", "error"
+    type: str 
     message: Optional[str] = None
     data: Optional[Dict[str, Any]] = None

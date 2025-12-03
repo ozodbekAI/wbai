@@ -2,10 +2,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from contextlib import contextmanager
 from typing import Generator
+from sqlalchemy.ext.declarative import declarative_base
 
 from core.config import settings
-from models.promt import Base
 
+
+Base = declarative_base()
 
 # Database engine
 DATABASE_URL = getattr(settings, 'DATABASE_URL', 

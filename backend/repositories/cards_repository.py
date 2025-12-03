@@ -5,15 +5,12 @@ from core.config import settings
 
 
 class CardsRepository:
-    """Repository for cards data"""
-    
     def __init__(self):
         self.cards_path = settings.DATA_DIR / "cards_raw.json"
         self.tech_path = settings.DATA_DIR / "tech_descriptions.json"
         self._cards_cache = None
     
     def _load_cards(self) -> List[Dict[str, Any]]:
-        """Load cards from JSON"""
         if self._cards_cache is None:
             if not self.cards_path.exists():
                 raise FileNotFoundError(f"cards_raw.json not found")
@@ -24,10 +21,8 @@ class CardsRepository:
         return self._cards_cache
     
     def find_by_article(self, article: str) -> Dict[str, Any]:
-        """Find card by article or vendorCode"""
         cards = self._load_cards()
-        
-        # Try as nmID
+
         try:
             nm_id = int(article)
             for card in cards:
@@ -35,8 +30,7 @@ class CardsRepository:
                     return card
         except ValueError:
             pass
-        
-        # Try as vendorCode
+
         article_lower = article.strip().lower()
         for card in cards:
             vendor_code = str(card.get("vendorCode", "")).strip().lower()
@@ -46,7 +40,6 @@ class CardsRepository:
         raise ValueError(f"Card not found: {article}")
     
     def extract_photo_urls(self, card: Dict[str, Any]) -> List[str]:
-        """Extract photo URLs from card"""
         photos = card.get("photos", [])
         urls = []
         for p in photos:
@@ -56,7 +49,6 @@ class CardsRepository:
         return urls
     
     def get_tech_description(self, nm_id: Optional[int]) -> Optional[str]:
-        """Get technical description by nmID"""
         if not nm_id:
             return None
         

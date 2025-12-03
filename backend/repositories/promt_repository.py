@@ -12,14 +12,12 @@ class PromptRepository:
         self.db = db
     
     def get_active_prompt(self, prompt_type: str) -> Optional[PromptTemplate]:
-        """Get active prompt by type"""
         return self.db.query(PromptTemplate).filter(
             PromptTemplate.prompt_type == prompt_type,
             PromptTemplate.is_active == True
         ).first()
     
     def get_all_prompts(self) -> List[PromptTemplate]:
-        """Get all prompt templates"""
         return self.db.query(PromptTemplate).all()
     
     def create_prompt(

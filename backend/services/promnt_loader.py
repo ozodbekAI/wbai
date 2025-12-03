@@ -5,11 +5,7 @@ from repositories.promt_repository import PromptRepository
 
 
 class PromptLoaderService:
-    """
-    Загрузка промптов из БД и объединение со статическими частями
-    """
-    
-    # СТАТИЧЕСКИЕ ФОРМАТЫ ОТВЕТОВ
+
     STATIC_RESPONSE_FORMAT = {
         "title_generator": """
 ФОРМАТ ОТВЕТА (СТРОГО JSON):
@@ -165,33 +161,24 @@ class PromptLoaderService:
         self.repo = PromptRepository(db)
     
     def get_full_prompt(self, prompt_type: str) -> str:
-        """
-        Получить полный промпт: динамическая часть из БД + статическая часть
-        """
-        # Получаем динамическую часть из БД
         prompt_template = self.repo.get_active_prompt(prompt_type)
         
         if not prompt_template:
             raise ValueError(f"Промпт типа '{prompt_type}' не найден в БД!")
         
-        # Собираем полный промпт
         full_prompt_parts = [
-            prompt_template.system_prompt,  # Основная динамическая часть
+            prompt_template.system_prompt, 
         ]
-        
-        # Добавляем строгие правила (если есть в БД)
+
         if prompt_template.strict_rules:
             full_prompt_parts.append("\n" + prompt_template.strict_rules)
         
-        # Добавляем статические общие правила (только для генераторов и рефайнеров)
         if any(x in prompt_type for x in ["generator", "refiner"]):
             full_prompt_parts.append(self.STATIC_RULES_COMMON)
         
-        # Добавляем примеры (если есть в БД)
         if prompt_template.examples:
             full_prompt_parts.append("\n📚 ПРИМЕРЫ:\n" + prompt_template.examples)
-        
-        # Добавляем формат ответа (статический)
+
         response_format = self._get_response_format(prompt_type)
         if response_format:
             full_prompt_parts.append(response_format)
@@ -199,12 +186,9 @@ class PromptLoaderService:
         return "\n\n".join(full_prompt_parts)
     
     def _get_response_format(self, prompt_type: str) -> Optional[str]:
-        """Получить формат ответа по типу промпта"""
-        # Точное совпадение
         if prompt_type in self.STATIC_RESPONSE_FORMAT:
             return self.STATIC_RESPONSE_FORMAT[prompt_type]
-        
-        # Fallback для старых названий
+
         if "title" in prompt_type.lower():
             if "validator" in prompt_type.lower():
                 return self.STATIC_RESPONSE_FORMAT["title_validator"]
@@ -232,7 +216,4 @@ class PromptLoaderService:
         return None
     
     def refresh_prompt(self, prompt_type: str):
-        """
-        Обновить промпт (для кэширования, если потребуется)
-        """
         return self.get_full_prompt(prompt_type)
