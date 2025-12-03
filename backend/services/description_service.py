@@ -14,20 +14,8 @@ from services.strict_validator import StrictValidatorService
 class DescriptionService:
     def __init__(self):
         self.validator = StrictValidatorService()
-
-        # OpenAI rasmiy klienti
-        if settings.USE_PROXY and settings.PROXY_URL:
-            http_client = httpx.Client(
-                proxies={
-                    "http://": settings.PROXY_URL,
-                    "https://": settings.PROXY_URL,
-                },
-                timeout=180.0,
-            )
-            self.client = OpenAI(api_key=settings.OPENAI_API_KEY, http_client=http_client)
-        else:
-            http_client = httpx.Client(timeout=180.0)
-            self.client = OpenAI(api_key=settings.OPENAI_API_KEY, http_client=http_client)
+        http_client = httpx.Client(timeout=180.0)
+        self.client = OpenAI(api_key=settings.OPENAI_API_KEY, http_client=http_client)
 
     # ===================== DESCRIPTION ===================== #
 

@@ -29,8 +29,6 @@ class Settings(BaseSettings):
     SCORE_OK_THRESHOLD: int = 90
     MAX_ITERATIONS: int = 3
 
-    PROXY_URL: str = "http://11f1wsnM:mddvZFkM@156.233.82.121:63464"
-    USE_PROXY: bool = True
 
     DB_HOST: str = "localhost"
     DB_PORT: int = 5432

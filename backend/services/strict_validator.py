@@ -24,21 +24,7 @@ class StrictValidatorService:
     }
 
     def __init__(self):
-        # OpenAI client
-        if settings.USE_PROXY and settings.PROXY_URL:
-            http_client = httpx.Client(
-                proxies={
-                    "http://": settings.PROXY_URL,
-                    "https://": settings.PROXY_URL,
-                },
-                timeout=180.0,
-            )
-            self.client = OpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                http_client=http_client,
-            )
-        else:
-            self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
     
     def validate_title_strict(
         self,

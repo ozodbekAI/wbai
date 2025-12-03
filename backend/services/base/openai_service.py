@@ -2,7 +2,7 @@ import json
 import time
 from typing import Dict, Any, List, Optional
 from abc import ABC, abstractmethod
-from openai import OpenAI
+from openai import OpenAI, http_client
 import httpx
 
 from core.config import settings
@@ -11,22 +11,10 @@ from core.config import settings
 class BaseOpenAIService(ABC):
 
     def __init__(self):
-        if settings.USE_PROXY and settings.PROXY_URL:
-            http_client = httpx.Client(
-                proxies={
-                    "http://": settings.PROXY_URL,
-                    "https://": settings.PROXY_URL,
-                },
-                timeout=180.0,
-            )
-            self.client = OpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                http_client=http_client
-            )
-        else:
-            http_client = httpx.Client(timeout=180.0)
-            self.client = OpenAI(api_key=settings.OPENAI_API_KEY, http_client=http_client)
-
+        self.client = OpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            http_client=http_client
+        )
     def _build_user_content(
         self,
         user_payload: Dict[str, Any],
