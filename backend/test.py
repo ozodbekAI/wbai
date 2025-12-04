@@ -20,6 +20,8 @@ result = pipeline_service.process_article(23723077)
 print(result)
 
 
+
+#
 # from services.data_loader import DataLoader
 
 # dataloader = DataLoader()
