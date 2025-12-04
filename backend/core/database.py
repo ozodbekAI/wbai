@@ -45,7 +45,6 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def get_db_dependency():
-    """FastAPI dependency for database session"""
     db = SessionLocal()
     try:
         yield db
