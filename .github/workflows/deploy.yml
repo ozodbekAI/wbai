@@ -7,7 +7,6 @@ on:
 
 jobs:
   deploy:
-    # Faqat commit message ichida [deploy] bo'lsa ishga tushadi
     if: ${{ contains(github.event.head_commit.message, '[deploy]') }}
     runs-on: ubuntu-latest
 
@@ -19,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up SSH
         uses: webfactory/ssh-agent@v0.5.3
@@ -32,9 +31,8 @@ jobs:
       - name: Ensure directory exists and sync files
         run: |
           ssh ${{ env.USER }}@${{ env.SERVER_IP }} "mkdir -p ${{ env.SERVER_DIR }}"
-          rsync -avz ./ ${{ env.USER }}@${{ env.SERVER_IP }}:${{ env.SERVER_DIR }}
+          rsync -avz --delete ./ ${{ env.USER }}@${{ env.SERVER_IP }}:${{ env.SERVER_DIR }}
 
-      # 🔧 BACKEND: venv, pip install, (ixtiyoriy alembic), service restart
       - name: Backend - install deps & restart service
         run: |
           ssh ${{ env.USER }}@${{ env.SERVER_IP }} << "EOF"
@@ -53,7 +51,6 @@ jobs:
               pip install -r requirements.txt
             fi
 
-            # Agar Alembic ishlatayotgan bo'lsang - bor bo'lsa ishlaydi
             if [ -d "alembic" ]; then
               echo ">>> [BACKEND] alembic upgrade head"
               alembic upgrade head || echo "Alembic xato berdi, lekin deploy davom etmoqda"
@@ -64,7 +61,6 @@ jobs:
             systemctl status wbai-backend --no-pager || true
           EOF
 
-      # 🎨 FRONTEND: npm install/ci, build, service restart
       - name: Frontend - build & restart service
         run: |
           ssh ${{ env.USER }}@${{ env.SERVER_IP }} << "EOF"
