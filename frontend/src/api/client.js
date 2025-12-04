@@ -23,6 +23,7 @@ async function request(path, { method = "GET", token, body, headers } = {}) {
   return data;
 }
 
+
 export const api = {
   login: (payload) =>
     request("/api/auth/auth/login", { method: "POST", body: payload }),
