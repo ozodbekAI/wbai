@@ -75,7 +75,11 @@ class ProcessController:
             yield f"data: {data}\n\n"
 
     async def fetch_current_card(self, article: str) -> dict | None:
-        return await asyncio.to_thread(
-            self.pipeline_service.get_current_card,
-            article=article,
-        )
+        try:
+            return await asyncio.to_thread(
+                self.pipeline_service.get_current_card,
+                article=article,
+            )
+        except ValueError:
+            # Pipeline kartani topa olmasa, None qaytaramiz
+            return None

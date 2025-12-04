@@ -33,9 +33,17 @@ class PipelineService:
 
         self.data_loader = DataLoader()
 
-    def get_current_card(self, article: str) -> Dict[str, Any] | None:
-        card = self.cards_repo.find_by_article(article)
+    def _load_card_from_api(self, article: str) -> Dict[str, Any]:
+
+        card = self.wb_repo.get_card_by_article(article)
         if not card:
+            raise ValueError(f"Card with article {article} not found in WB API")
+        return card
+
+    def get_current_card(self, article: str) -> Dict[str, Any] | None:
+        try:
+            card = self._load_card_from_api(article)
+        except ValueError:
             return {
                 "status": "error",
                 "message": f"Card with article {article} not found",
@@ -72,15 +80,13 @@ class PipelineService:
             if log_callback:
                 log_callback(msg)
 
-        log("📥 Loading card data...")
-        
-        card = self.cards_repo.find_by_article(article)
-        if not card:
-            raise ValueError(f"Card with article {article} not found")
+        log("📥 Loading card data (via WB API)...")
+
+        card = self._load_card_from_api(article)
 
         subject_name = card.get("subjectName") or card.get("subject", {}).get("name")
         
-        # Excel satri va fixed_data
+        
         fixed_row = self.fixed_repo.get_by_artikul(article)
         fixed_data = self._build_fixed_data_dict(fixed_row)
         
@@ -92,17 +98,15 @@ class PipelineService:
         
         log(f"📋 Subject ID: {subject_id}, Gender: {gender or 'unknown'}")
         
-        # subject config bo‘yicha fixed / conditional / generate bo‘linishi
         fixed_fields, conditional_skip, conditional_fill, generate_fields = \
             self.data_loader.filter_characteristics_by_type(charcs_meta_raw, subject_id, gender)
 
         fixed_field_names = {f.get("name") for f in fixed_fields if f.get("name")}
         skip_field_names = {f.get("name") for f in conditional_skip if f.get("name")}
-        excel_fixed_names = set(fixed_data.keys())  # Excel ustunlari ham lock bo‘ladi
+        excel_fixed_names = set(fixed_data.keys())  
 
         locked_field_names = fixed_field_names | skip_field_names | excel_fixed_names
 
-        # AI faqat locked bo‘lmagan generate_fields bo‘yicha ishlaydi
         generate_fields_for_ai = [
             meta for meta in generate_fields
             if meta.get("name") and meta.get("name") not in locked_field_names
@@ -110,11 +114,11 @@ class PipelineService:
 
         if log_callback:
             log_callback(
-                f"🔒 Locked fields (fixed+skip+excel): {len(locked_field_names)} "
+                f"Locked fields (fixed+skip+excel): {len(locked_field_names)} "
                 f"({', '.join(list(locked_field_names)[:10]) if locked_field_names else 'none'})"
             )
             log_callback(
-                f"🧪 Fields for AI generation: {len(generate_fields_for_ai)} "
+                f"Fields for AI generation: {len(generate_fields_for_ai)} "
                 f"(all generate_fields in config: {len(generate_fields)})"
             )
 
@@ -133,18 +137,11 @@ class PipelineService:
         fields_without_dict = set(generate_field_names) - fields_with_dict
         
         if fields_without_dict:
-            log(f"ℹ️ Text fields (no dictionary): {len(fields_without_dict)}")
+            log(f"ℹText fields (no dictionary): {len(fields_without_dict)}")
             for field in sorted(fields_without_dict)[:3]:
                 log(f"    - {field}")
 
-        log(f"✅ Data loaded: {len(photo_urls)} photos")
-        log(f"   - AI generate fields (config): {len(generate_fields)}")
-        log(f"   - AI generate fields (after lock): {len(generate_fields_for_ai)}")
-        log(f"   - Fields with dictionary: {len(filtered_allowed_values)}")
-        log(f"   - Text fields: {len(fields_without_dict)}")
-
-        # generate_fields_for_ai allaqachon lock’ni hisobga olgan, qayta hisoblash shart emas
-        log("\n📸 STEP 1: Analyzing images...")
+        log("\nSTEP 1: Analyzing images...")
         
         image_description = self.image_analyzer.analyze_images(
             photo_urls=photo_urls[:3],
@@ -173,7 +170,6 @@ class PipelineService:
         elif not isinstance(detected_colors, list):
             detected_colors = []
 
-        # Dublikatlarni olib tashlab, maksimal 5 ta rang qoldiramiz
         normalized_colors = []
         for c in detected_colors:
             cs = str(c).strip()
@@ -207,7 +203,6 @@ class PipelineService:
         chars_iterations = batched_result["iterations"]
         chars_issues = batched_result["issues"]
 
-        # FULL characteristics (AI + Excel fixed + conditional skip + color)
         merged_charcs = self._build_full_characteristics(
             charcs_meta_raw=charcs_meta_raw,
             fixed_row=fixed_row,
@@ -225,10 +220,6 @@ class PipelineService:
         )
         total_filled = sum(1 for c in merged_charcs if c.get("value"))
         
-        log(f"✅ Generated {len(merged_charcs)} characteristics (full list)")
-        log(f"   - AI generated & filled: {ai_filled}/{len(ai_charcs_all)}")
-        log(f"   - Fixed from Excel filled: {fixed_filled}/{len(fixed_fields)}")
-        log(f"   - Total filled: {total_filled}/{len(merged_charcs)}")
         time.sleep(1)
 
         final_charcs = merged_charcs
@@ -337,16 +328,11 @@ class PipelineService:
         return characteristics
 
     def _build_fixed_data_dict(self, fixed_row: Dict[str, Any]) -> Dict[str, List[str]]:
-        """
-        Excel satridan fixed data dictini qurish.
-        Bu AI ga kontekst uchun beriladi, lekin AI bu fieldlarni generate qilmaydi.
-        """
         if not fixed_row:
             return {}
 
         fixed_row_clean = fixed_row.copy()
         if fixed_row_clean:
-            # birinchi ustun (odatda Артикул) olib tashlanadi
             first_key = list(fixed_row_clean.keys())[0]
             fixed_row_clean.pop(first_key, None)
 
@@ -507,8 +493,7 @@ class PipelineService:
             log(f"  ✅ Batch done: score={batch_score}, fields={len(batch_charcs)}")
 
         overall_score = int(sum(batch_scores) / len(batch_scores)) if batch_scores else 0
-
-        # Excel'da bor bo'lib, AI bo'sh qoldirgan bo'lsa, fixed_data bilan to'ldirish
+        
         if fixed_data:
             for ch in all_charcs:
                 name = ch.get("name")
