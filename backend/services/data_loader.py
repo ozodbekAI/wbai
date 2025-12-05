@@ -11,10 +11,6 @@ class DataLoader:
     @staticmethod
     @lru_cache(maxsize=50)
     def load_subject_config(subject_id: int) -> Dict[str, Any]:
-        """
-        Load subject-specific configuration from JSON file.
-        Example: subject_id=177 -> loads data/charcs/177.json
-        """
         charcs_dir = settings.DATA_DIR / "charcs"
         config_path = charcs_dir / f"{subject_id}.json"
         
@@ -145,6 +141,46 @@ class DataLoader:
         gen_dict_path = settings.DATA_DIR / "Справочник генерация.json"
         with gen_dict_path.open("r", encoding="utf-8") as f:
             return json.load(f)
+
+    # 🔥 YANGI: Ключевые_слова.json ni o‘qish
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def load_keywords() -> Dict[str, List[str]]:
+        """
+        Ключевые_слова.json dan:
+        {
+          "Назначение": ["вечерний", "спорт", ...],
+          "Стиль": [...],
+          ...
+        }
+        """
+        path = settings.DATA_DIR / "Ключевые_слова.json"
+        if not path.exists():
+            raise FileNotFoundError(f"Ключевые_слова.json not found: {path}")
+        
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+
+    # 🔥 YANGI: allowed_values faqat Ключевые_слова.json dan
+    @staticmethod
+    def build_allowed_values_from_keywords(
+        field_names: List[str],
+    ) -> Dict[str, List[str]]:
+        """
+        Har bir field_name uchun allowed values FAQAT Ключевые_слова.json dan olinadi.
+        Qo‘shimcha '()' yoki boshqa narsa qo‘shilmaydi, aynan jsondagi so‘zlar.
+        """
+        keywords = DataLoader.load_keywords()
+        result: Dict[str, List[str]] = {}
+
+        for name in field_names:
+            if name == "Цвет":
+                # Цвет bilan ishlash boshqa pipeline’da, shu yerda ignore
+                continue
+            # Agar nom bo‘yicha topilmasa — bo‘sh ro‘yxat (free text yoki AIga erkinlik)
+            result[name] = keywords.get(name, [])
+
+        return result
     
     @staticmethod
     def build_allowed_values_for_fields(
@@ -154,6 +190,7 @@ class DataLoader:
         """
         Build allowed_values dict for specific field names.
         Returns only fields that exist in generator dict.
+        (ESKI LOGIKA — hozircha boshqa joylar ishlatayotgan bo‘lsa, ular uchun qoldiramiz)
         """
         generator_dict = DataLoader.load_generator_dict()
         
@@ -217,6 +254,7 @@ class DataLoader:
         DataLoader.load_limits.cache_clear()
         DataLoader.load_generator_dict.cache_clear()
         DataLoader.load_subject_config.cache_clear()
+        DataLoader.load_keywords.cache_clear()
         print("✅ Data loader cache cleared")
 
     @staticmethod

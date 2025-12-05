@@ -1,6 +1,6 @@
-// src/WorkspaceView.jsx
+// src/components/WorkspaceView.jsx
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 
 import HeaderBar from "./HeaderBar";
 import SearchPanel from "./SearchPanel";
@@ -13,6 +13,8 @@ import StatsCards from "./StatsCards";
 import LogsPanel from "./LogsPanel";
 import FinalPanel from "./FinalPanel";
 import HistorySidebar from "./HistorySidebar";
+import PromptsPanel from "./PromptsPanel";
+import ValidationIssuesPanel from "./ValidationIssuesPanel";
 
 import { api } from "../api/client";
 
@@ -23,21 +25,23 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const [processingCurrent, setProcessingCurrent] = useState(false);
   const [processing, setProcessing] = useState(false);
 
-  const [card, setCard] = useState(null); // текущая карточка WB
-  const [result, setResult] = useState(null); // AI natijasi
-  const [logs, setLogs] = useState([]); // [{time, msg}, ...]
+  const [card, setCard] = useState(null);
+  const [result, setResult] = useState(null);
+  const [logs, setLogs] = useState([]);
 
-  // CURRENT CARD validatsiya (validation_card dan kelgan)
   const [currentValidation, setCurrentValidation] = useState(null);
 
-  // Final editable state
   const [finalTitle, setFinalTitle] = useState("");
   const [finalDescription, setFinalDescription] = useState("");
-  const [finalCharValues, setFinalCharValues] = useState({}); // { [name]: string[] }
+  const [finalCharValues, setFinalCharValues] = useState({});
 
-  // History
-  const [sessions, setSessions] = useState([]);
-  const [activeSessionId, setActiveSessionId] = useState(null);
+  // HISTORY
+  const [historyItems, setHistoryItems] = useState([]);
+  const [historyStats, setHistoryStats] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // PROMPTS ADMIN
+  const [promptsOpen, setPromptsOpen] = useState(false);
 
   const pushLog = (msg) => {
     setLogs((prev) => [
@@ -67,17 +71,17 @@ export default function WorkspaceView({ token, username, onLogout }) {
     setCurrentValidation(null);
 
     try {
-      pushLog(`Запрос текущей карточки для: ${article.trim()}`);
-      const data = await api.getCurrentCard(token, {
-        article: article.trim(),
-      });
+      const art = article.trim();
+      pushLog(`Запрос текущей карточки для: ${art}`);
+
+      const data = await api.getCurrentCard(token, { article: art });
 
       if (data.status !== "ok") {
         throw new Error(data.message || "Не удалось получить карточку");
       }
 
       setCard(data.card);
-      setCurrentValidation(data.response || null); // 🔥 validation_card natijalari
+      setCurrentValidation(data.response || null);
       pushLog("Текущая карточка WB получена");
     } catch (e) {
       setError(e.message);
@@ -109,7 +113,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
         : [c.value].filter(Boolean);
     });
 
-    // Agar AI’da yo‘q, lekin eski kartochkada bo‘lsa – fallback
     (cardData.characteristics || []).forEach((c) => {
       if (!fv[c.name]) {
         fv[c.name] = Array.isArray(c.value)
@@ -121,7 +124,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
     setFinalCharValues(fv);
   };
 
-  /** /api/process – AI generatsiya (SSE + oddiy JSON qo'llab-quvvatlanadi) */
+  /** /api/process – AI generatsiya (SSE + oddiy JSON) */
   const handleGenerate = async () => {
     if (!article.trim() || !card) return;
     setProcessing(true);
@@ -130,12 +133,12 @@ export default function WorkspaceView({ token, username, onLogout }) {
     setResult(null);
 
     try {
+      const art = article.trim();
       pushLog("Запуск AI обработки…");
-      const res = await api.process({ article: article.trim() }, token);
 
+      const res = await api.process({ article: art }, token);
       const contentType = res.headers.get("content-type") || "";
 
-      // ❗ Avval HTTP xatoni tekshiramiz
       if (!res.ok) {
         let msg = `Request failed with status ${res.status}`;
         try {
@@ -146,19 +149,14 @@ export default function WorkspaceView({ token, username, onLogout }) {
             const errText = await res.text();
             if (errText) msg = errText;
           }
-        } catch (_) {
-          // ignore
-        }
+        } catch (_) {}
         throw new Error(msg);
       }
 
-      // 1) SSE – text/event-stream bo'lsa
       if (contentType.includes("text/event-stream")) {
         const reader = res.body.getReader();
         const decoder = new TextDecoder("utf-8");
         let buffer = "";
-
-        // Oxirgi muvaffaqiyatli natijani saqlab boramiz
         let lastCandidate = null;
 
         while (true) {
@@ -167,15 +165,13 @@ export default function WorkspaceView({ token, username, onLogout }) {
 
           buffer += decoder.decode(value, { stream: true });
 
-          // SSE bloklarini ajratamiz: har bir event "\n\n" bilan tugaydi
           const blocks = buffer.split("\n\n");
-          buffer = blocks.pop() || ""; // oxirgi bo'lak to'liq bo'lmasligi mumkin
+          buffer = blocks.pop() || "";
 
           for (const block of blocks) {
             const line = block.trim();
             if (!line) continue;
 
-            // Serverdan faqat bitta "data: {...}" qator keladi deb faraz qilamiz
             const dataLine = line
               .split("\n")
               .find((ln) => ln.startsWith("data:"));
@@ -188,7 +184,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
             try {
               const evt = JSON.parse(jsonStr);
 
-              // LOG eventlar
               if (
                 evt.type === "log" ||
                 evt.type === "card_log" ||
@@ -200,7 +195,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
                 continue;
               }
 
-              // Natija bo'lishi mumkin bo'lgan variantlar:
               let candidate = null;
 
               if (evt.type === "result" && evt.payload) {
@@ -211,10 +205,8 @@ export default function WorkspaceView({ token, username, onLogout }) {
                 Array.isArray(evt.results.cards) &&
                 evt.results.cards.length > 0
               ) {
-                // Agar batch bo'lsa – birinchi kartani olamiz
                 candidate = evt.results.cards[0];
               } else if (!evt.type) {
-                // type yo'q, lekin bu asl natija bo'lishi mumkin
                 candidate = evt;
               }
 
@@ -225,69 +217,33 @@ export default function WorkspaceView({ token, username, onLogout }) {
                   candidate.new_characteristics ||
                   typeof candidate.validation_score !== "undefined")
               ) {
-                // 🔥 Har bir kelgan natijani darhol UI ga qo'yamiz
                 lastCandidate = candidate;
                 setResult(candidate);
                 initFinalFromResult(card, candidate);
               }
             } catch (err) {
               console.error("Failed to parse SSE data chunk:", err, jsonStr);
-              // SSE bo'lak buzilsa log qilamiz, lekin butun jarayonni to'xtatmaymiz
               pushLog(`⚠️ Ошибка парсинга SSE: ${String(err)}`);
             }
           }
         }
 
-        // Stream tugagach, umuman natija bo'lmasa – haqiqiy xato
         if (!lastCandidate) {
-          throw new Error("Пустой ответ от сервера (нет финального результата)");
+          throw new Error(
+            "Пустой ответ от сервера (нет финального результата)"
+          );
         }
 
         pushLog("AI обработка завершена (SSE)");
-
-        const sessionId = Date.now().toString();
-        const session = {
-          id: sessionId,
-          article: article.trim(),
-          status: "done",
-          time: new Date().toLocaleString("ru-RU"),
-          validation_score: lastCandidate.validation_score,
-        };
-        setSessions((prev) => [session, ...prev]);
-        setActiveSessionId(sessionId);
       } else {
-        // 2) Oddiy JSON javob
         const parsed = await res.json();
         setResult(parsed);
         pushLog("AI обработка завершена");
-
         initFinalFromResult(card, parsed);
-
-        const sessionId = Date.now().toString();
-        const session = {
-          id: sessionId,
-          article: article.trim(),
-          status: "done",
-          time: new Date().toLocaleString("ru-RU"),
-          validation_score: parsed.validation_score,
-        };
-        setSessions((prev) => [session, ...prev]);
-        setActiveSessionId(sessionId);
       }
     } catch (e) {
       setError(e.message);
       pushLog(`❌ Ошибка AI: ${e.message}`);
-
-      const sessionId = Date.now().toString();
-      const session = {
-        id: sessionId,
-        article: article.trim(),
-        status: "error",
-        time: new Date().toLocaleString("ru-RU"),
-        validation_score: null,
-      };
-      setSessions((prev) => [session, ...prev]);
-      setActiveSessionId(sessionId);
     } finally {
       setProcessing(false);
     }
@@ -355,8 +311,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
 
   const handleSubmitToWB = () => {
     if (!finalData) return;
-    // shu yerda backend’ga POST qilasan, masalan:
-    // api.submitToWB(token, finalData)
     pushLog("📤 Отправка финальных данных в WB (пока только console.log)");
     console.log("WB payload:", finalData);
   };
@@ -374,106 +328,137 @@ export default function WorkspaceView({ token, username, onLogout }) {
     URL.revokeObjectURL(url);
   };
 
-  /** History */
-  const handleHistorySelect = (id) => {
-    setActiveSessionId(id);
-    // agar keyinchalik session’larni saqlab qayta yuklashni xohlasang,
-    // shu yerga load logikasini qo‘shasan
+  const combinedValidation = result
+    ? { messages: result.validation_issues || [], stats: result.validation_stats }
+    : currentValidation;
+
+  const handleDownloadExcel = () => {
+    console.log("Download Excel for:", article || card?.nmID);
   };
 
-  const handleHistoryClear = () => {
-    setSessions([]);
-    setActiveSessionId(null);
-  };
+  /** HISTORY – API’dan olish */
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const [listRes, statsRes] = await Promise.all([
+        api.history.list(token, { limit: 50, offset: 0 }),
+        api.history.stats(token, { days: 30 }),
+      ]);
+
+      setHistoryItems(listRes.items || listRes || []);
+      setHistoryStats(statsRes || null);
+    } catch (err) {
+      console.error("Failed to load history", err);
+      pushLog(`⚠️ Ошибка загрузки истории: ${String(err.message || err)}`);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [token]);
+
+  // sahifa ochilganda history ni avtomatik yuklaymiz
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
+
+  const handleOpenPrompts = () => setPromptsOpen(true);
+  const handleClosePrompts = () => setPromptsOpen(false);
 
   return (
     <div className="min-h-screen bg-gray-100">
       <HeaderBar
         username={username}
         onLogout={onLogout}
-        onOpenPrompts={() => {}}
+        onOpenPrompts={handleOpenPrompts}
+        onDownloadExcel={handleDownloadExcel}
       />
 
-      <main className="max-w-[1800px] mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-[1.7fr,0.8fr] gap-6">
-        <div className="space-y-6">
-          {/* Article kiritish + current card */}
-          <SearchPanel
-            article={article}
-            setArticle={setArticle}
-            onStart={handleStart}
-            processing={processingCurrent}
-            error={error}
-            onClearError={handleClearError}
-            onCancel={handleCancelCurrent}
-          />
-
-          <StatsCards result={result} processing={processing} />
-
-          {/* WB current card */}
-          <CurrentCardPanel
-            card={card}
-            validation={
-              result
-                ? { messages: result.validation_issues || [] } // AI characteristics validator
-                : currentValidation // 🔥 validation_card natijalari (get_current_card dan)
-            }
-            editableTitle={card?.title || ""}
-            onChangeTitle={() => {}}
-            editableDescription={card?.description || ""}
-            onChangeDescription={() => {}}
-            onGenerate={processing ? handleCancelGenerate : handleGenerate}
-            processingGenerate={processing}
-          />
-
-          {/* AI natija + compare bloklar */}
-          {card && result && (
-            <>
-              <CompareTitle
-                oldTitle={card.title}
-                newTitle={result.new_title}
-                finalTitle={finalTitle}
-                onChangeFinalTitle={setFinalTitle}
-                meta={result.meta || result}
-              />
-
-              <CompareDescription
-                oldDesc={card.description}
-                newDesc={result.new_description}
-                finalDesc={finalDescription}
-                onChangeFinalDesc={setFinalDescription}
-                meta={result.meta || result}
-              />
-
-              <CompareCharacteristics
-                oldChars={card.characteristics || []}
-                newChars={result.new_characteristics || []}
-                finalValues={finalCharValues}
-                onChangeFinalValue={handleChangeFinalChar}
-              />
-            </>
-          )}
-
-          <LogsPanel logs={logs} />
-
-          {result && finalData && (
-            <FinalPanel
-              article={article || card?.nmID}
-              result={result}
-              finalData={finalData}
-              onSubmit={handleSubmitToWB}
-              onDownload={handleDownloadJson}
+      <main className="max-w-[1800px] mx-auto px-6 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-[1.7fr,0.8fr] gap-6">
+          {/* LEFT MAIN COLUMN */}
+          <div className="space-y-6">
+            <SearchPanel
+              article={article}
+              setArticle={setArticle}
+              onStart={handleStart}
+              processing={processingCurrent}
+              error={error}
+              onClearError={handleClearError}
+              onCancel={handleCancelCurrent}
             />
-          )}
-        </div>
 
-        {/* Right – History */}
-        <HistorySidebar
-          sessions={sessions}
-          activeId={activeSessionId}
-          onSelect={handleHistorySelect}
-          onClear={handleHistoryClear}
-        />
+            <StatsCards result={result} processing={processing} />
+
+            <CurrentCardPanel
+              card={card}
+              validation={combinedValidation}
+              editableTitle={card?.title || ""}
+              onChangeTitle={() => {}}
+              editableDescription={card?.description || ""}
+              onChangeDescription={() => {}}
+              onGenerate={processing ? handleCancelGenerate : handleGenerate}
+              processingGenerate={processing}
+            />
+
+            {card && result && (
+              <>
+                <CompareTitle
+                  oldTitle={card.title}
+                  newTitle={result.new_title}
+                  finalTitle={finalTitle}
+                  onChangeFinalTitle={setFinalTitle}
+                  meta={result.meta || result}
+                />
+
+                <CompareDescription
+                  oldDesc={card.description}
+                  newDesc={result.new_description}
+                  finalDesc={finalDescription}
+                  onChangeFinalDesc={setFinalDescription}
+                  meta={result.meta || result}
+                />
+
+                <CompareCharacteristics
+                  oldChars={card.characteristics || []}
+                  newChars={result.new_characteristics || []}
+                  finalValues={finalCharValues}
+                  onChangeFinalValue={handleChangeFinalChar}
+                />
+              </>
+            )}
+
+            <LogsPanel logs={logs} />
+
+            {result && finalData && (
+              <FinalPanel
+                article={article || card?.nmID}
+                result={result}
+                finalData={finalData}
+                onSubmit={handleSubmitToWB}
+                onDownload={handleDownloadJson}
+              />
+            )}
+          </div>
+
+          {/* RIGHT COLUMN – tepada Ошибки, pastda История */}
+          <div className="flex flex-col gap-4">
+            <ValidationIssuesPanel validation={combinedValidation} />
+
+            <HistorySidebar
+              historyItems={historyItems}
+              loading={historyLoading}
+              stats={historyStats}
+              onRefresh={loadHistory}
+            />
+          </div>
+        </div>
       </main>
+
+      {/* PROMPTS ADMIN PANEL */}
+      <PromptsPanel
+        open={promptsOpen}
+        onClose={handleClosePrompts}
+        token={token}
+      />
     </div>
   );
 }

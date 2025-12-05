@@ -3,21 +3,27 @@ import { Loader2, LogIn, AlertCircle, Package } from "lucide-react";
 import { api } from "../api/client";
 
 export default function LoginView({ onSuccess }) {
-  const [username, setUsername] = useState(localStorage.getItem("wb_username") || "");
+  const [username, setUsername] = useState(
+    localStorage.getItem("wb_username") || ""
+  );
   const [password, setPassword] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
   const [error, setError] = useState("");
 
   const handleLogin = async () => {
+    if (!username || !password) return;
+
     setLoggingIn(true);
     setError("");
     try {
-      const data = await api.login({ username, password });
+      // MUHIM O'ZGARISH: obyekt emas, ikkita string parametr
+      const data = await api.login(username, password);
+
       localStorage.setItem("wb_token", data.access_token);
       localStorage.setItem("wb_username", username);
       onSuccess({ token: data.access_token, username });
     } catch (e) {
-      setError(e.message);
+      setError(e.message || "Ошибка авторизации");
     } finally {
       setLoggingIn(false);
     }
@@ -38,7 +44,9 @@ export default function LoginView({ onSuccess }) {
 
         <div className="space-y-5">
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Логин</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Логин
+            </label>
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -48,7 +56,9 @@ export default function LoginView({ onSuccess }) {
             />
           </div>
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Пароль</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Пароль
+            </label>
             <input
               type="password"
               value={password}
@@ -71,7 +81,17 @@ export default function LoginView({ onSuccess }) {
             disabled={loggingIn || !username || !password}
             className="w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-xl hover:from-purple-700 hover:to-pink-700 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {loggingIn ? (<><Loader2 className="w-5 h-5 animate-spin" />Вход...</>) : (<><LogIn className="w-5 h-5" />Войти</>)}
+            {loggingIn ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                Вход...
+              </>
+            ) : (
+              <>
+                <LogIn className="w-5 h-5" />
+                Войти
+              </>
+            )}
           </button>
         </div>
       </div>
