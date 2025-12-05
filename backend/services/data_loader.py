@@ -136,6 +136,18 @@ class DataLoader:
             return {k: v for k, v in all_limits.items() if k != "Цвет"}
     
     @staticmethod
+    def get_limits_for_field(name: str) -> Dict[str, int]:
+
+        limits_all = DataLoader.load_limits(color_only=False)
+        limits = limits_all.get(name) or {}
+
+        if name == "Цвет" and not limits:
+            color_limits = DataLoader.load_limits(color_only=True)
+            limits = color_limits.get("Цвет", {}) or {}
+
+        return limits
+
+    @staticmethod
     @lru_cache(maxsize=1)
     def load_generator_dict() -> Dict[str, List[str]]:
         gen_dict_path = settings.DATA_DIR / "Справочник генерация.json"

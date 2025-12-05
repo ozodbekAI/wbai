@@ -182,7 +182,11 @@ class CharacteristicsValidatorService(BaseOpenAIService):
             )
 
             refined = result.get("characteristics", characteristics)
-            return self._normalize_characteristics(refined)
+            return self._normalize_characteristics(
+                refined,
+                allowed_values=allowed_values,
+                limits=limits
+            )
 
         except Exception:
             return characteristics
@@ -203,28 +207,96 @@ class CharacteristicsValidatorService(BaseOpenAIService):
     def _normalize_characteristics(
         self,
         characteristics: List[Dict[str, Any]],
+        allowed_values: Dict[str, List[str]] | None = None,
     ) -> List[Dict[str, Any]]:
-        for char in characteristics:
-            if "value" in char:
-                value = char["value"]
 
-                if isinstance(value, str):
-                    if "," in value:
-                        char["value"] = [
-                            v.strip() for v in value.split(",") if v.strip()
-                        ]
-                    else:
-                        char["value"] = [value.strip()] if value.strip() else []
-                elif isinstance(value, list):
-                    char["value"] = [
-                        str(v).strip()
-                        for v in value
-                        if str(v).strip()
+        allowed_values = allowed_values or {}
+
+        for char in characteristics:
+            name = char.get("name")
+            if "value" not in char:
+                char["value"] = []
+                continue
+
+            value = char["value"]
+
+            # 1) Avval listga normalizatsiya
+            if isinstance(value, str):
+                if "," in value:
+                    values_list = [
+                        v.strip() for v in value.split(",") if v.strip()
                     ]
-                elif value is not None:
-                    char["value"] = [str(value)]
                 else:
-                    char["value"] = []
+                    values_list = [value.strip()] if value.strip() else []
+            elif isinstance(value, list):
+                values_list = [
+                    str(v).strip()
+                    for v in value
+                    if str(v).strip()
+                ]
+            elif value is not None:
+                v = str(value).strip()
+                values_list = [v] if v else []
+            else:
+                values_list = []
+
+            dict_vals = allowed_values.get(name) or []
+            if not dict_vals:
+                # dictionary yo'q – erkin matn
+                char["value"] = values_list
+                continue
+
+            normalized_dict = [str(v).strip() for v in dict_vals if str(v).strip()]
+            dict_lower_map = {v.lower(): v for v in normalized_dict}
+
+            mapped: List[str] = []
+
+            for raw in values_list:
+                if not raw:
+                    continue
+                raw_str = str(raw).strip()
+
+                if raw_str in normalized_dict:
+                    if raw_str not in mapped:
+                        mapped.append(raw_str)
+                    continue
+
+                base = raw_str.split("(")[0].split("[")[0].strip()
+                base = base.rstrip(" .,-;")
+
+                if base in normalized_dict:
+                    if base not in mapped:
+                        mapped.append(base)
+                    continue
+
+                lower_raw = raw_str.lower()
+                lower_base = base.lower()
+
+                if lower_raw in dict_lower_map:
+                    val = dict_lower_map[lower_raw]
+                    if val not in mapped:
+                        mapped.append(val)
+                    continue
+
+                if lower_base in dict_lower_map:
+                    val = dict_lower_map[lower_base]
+                    if val not in mapped:
+                        mapped.append(val)
+                    continue
+
+                matched = False
+                for dv in normalized_dict:
+                    if dv.lower() in raw_str.lower():
+                        if dv not in mapped:
+                            mapped.append(dv)
+                        matched = True
+                        break
+                if matched:
+                    continue
+
+                # dictionarydan tashqaridagi qiymat – tashlab yuboramiz
+
+            char["value"] = mapped
 
         return characteristics
 
@@ -252,8 +324,11 @@ class CharacteristicsValidatorService(BaseOpenAIService):
 
 ПРОВЕРКИ:
 1. ОБЯЗАТЕЛЬНЫЕ (required): заполнены?
-2. ALLOWED VALUES: из словарей?
-3. LIMITS: min/max соблюдены?
+2. ALLOWED VALUES:
+   - Для полей с allowed_values[name] КАЖДОЕ значение ДОЛЖНО быть ровно одним из allowed_values[name].
+   - Если значение содержит запятые, скобки или дополнительный текст — это ошибка.
+3. LIMITS:
+   - min/max количество значений соблюдены?
 4. LOCKED FIELDS: не изменены?
 
 SCORING:
@@ -267,7 +342,7 @@ SCORING:
 {
   "score": 85,
   "issues": [
-    "Поле X не заполнено",
+    "Поле 'Назначение' содержит строку с несколькими значениями и скобками, нужно разбить на отдельные значения из allowed_values",
     "Значение Y не из словаря"
   ]
 }
@@ -284,18 +359,20 @@ SCORING:
 
 ПРАВИЛА:
 1. locked_fields НЕ МЕНЯТЬ!
-2. Используй ТОЛЬКО значения из allowed_values
-3. Соблюдай limits (min/max)
-4. Обязательные поля (required) заполняй ВСЕГДА
-5. detected_colors используй для контекста
+2. Для полей с allowed_values[name]:
+   - Используй ТОЛЬКО значения из allowed_values[name].
+   - Если нужно несколько значений, каждая строка = одно значение из словаря.
+   - Никаких запятых и скобок внутри одного элемента.
+3. Соблюдай limits (min/max количество значений).
+4. Обязательные поля (required) заполняй ВСЕГДА.
 
 ФОРМАТ ОТВЕТА (JSON):
 {
   "characteristics": [
     {
-      "id": 123,
-      "name": "Материал",
-      "value": ["хлопок"]
+      "id": 30000,
+      "name": "Назначение",
+      "value": ["повседневный", "городской", "вечерний"]
     }
   ]
 }
@@ -303,6 +380,7 @@ SCORING:
 НЕ ДОБАВЛЯЙТЕ КОММЕНТАРИЕВ!
 ТОЛЬКО JSON!
 """.strip()
+
 
     def get_fallback_prompt(self) -> str:
         return self._get_fallback_validation_prompt()

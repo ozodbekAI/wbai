@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db
 from routers import auth, process, process_batch, history
-from routers.admin import users, admin_promts
+from routers.admin import users, admin_promts, keywords
 
 
 # Initialize database
@@ -33,6 +33,7 @@ app.include_router(process_batch.router, prefix="/api/batch", tags=["Batch Proce
 app.include_router(history.router, prefix="/api/history", tags=["History"])
 app.include_router(users.router, prefix="/api/admin", tags=["Admin - Users"])
 app.include_router(admin_promts.router, prefix="/api/admin", tags=["Admin - Prompts"])
+app.include_router(keywords.router, prefix="/api/admin", tags=["Admin - Keywords"])
 
 
 @app.get("/")
