@@ -53,7 +53,11 @@ class CharacteristicsGeneratorService(BaseOpenAIService):
                 charcs_meta_raw
             )
             
-            characteristics = self._normalize_values(characteristics)
+            characteristics = self._normalize_values(
+                characteristics,
+                allowed_values=allowed_values,
+                limits=limits
+            )
             
             if log_callback:
                 log_callback(f"✅ Generated {len(characteristics)} characteristics")
@@ -116,25 +120,125 @@ class CharacteristicsGeneratorService(BaseOpenAIService):
     
     def _normalize_values(
         self,
-        characteristics: List[Dict[str, Any]]
+        characteristics: List[Dict[str, Any]],
+        allowed_values: Dict[str, List[str]] | None = None,
+        limits: Dict[str, Dict[str, int]] | None = None,
     ) -> List[Dict[str, Any]]:
+        """
+        - Barcha value’larni list ko‘rinishiga keltiradi
+        - Agar allowed_values[name] bo‘lsa:
+            -> final qiymatlar faqat shu ro‘yxatdagi elementlardan iborat bo‘ladi
+        - Agar limits[name].max bo‘lsa:
+            -> elementlar soni max dan oshsa, kesib tashlanadi
+        """
+        allowed_values = allowed_values or {}
+        limits = limits or {}
+
         for char in characteristics:
-            if "value" in char:
-                value = char["value"]
-                
-                if isinstance(value, str):
-                    if "," in value:
-                        char["value"] = [v.strip() for v in value.split(",") if v.strip()]
-                    else:
-                        char["value"] = [value.strip()] if value.strip() else []
-                elif isinstance(value, list):
-                    char["value"] = [str(v).strip() for v in value if str(v).strip()]
-                elif value is not None:
-                    char["value"] = [str(value)]
+            name = char.get("name")
+            if "value" not in char:
+                char["value"] = []
+                continue
+
+            value = char["value"]
+
+            # 1) Avval listga normalizatsiya
+            if isinstance(value, str):
+                if "," in value:
+                    values_list = [
+                        v.strip() for v in value.split(",") if v.strip()
+                    ]
                 else:
-                    char["value"] = []
-        
+                    values_list = [value.strip()] if value.strip() else []
+            elif isinstance(value, list):
+                values_list = [
+                    str(v).strip()
+                    for v in value
+                    if str(v).strip()
+                ]
+            elif value is not None:
+                v = str(value).strip()
+                values_list = [v] if v else []
+            else:
+                values_list = []
+
+            # 2) Agar bu field uchun dictionary bo'lmasa – free text
+            dict_vals = allowed_values.get(name) or []
+            if not dict_vals:
+                # limits bo‘lsa, faqat sonini kesamiz
+                field_limits = limits.get(name) or {}
+                max_limit = field_limits.get("max") or field_limits.get("maxCount") or field_limits.get("max_count")
+                if isinstance(max_limit, int) and max_limit > 0 and len(values_list) > max_limit:
+                    values_list = values_list[:max_limit]
+                char["value"] = values_list
+                continue
+
+            # 3) Dictionary bor bo‘lsa – faqat allowed ichida bo‘lganlarni qoldiramiz
+            normalized_dict = [str(v).strip() for v in dict_vals if str(v).strip()]
+            dict_lower_map = {v.lower(): v for v in normalized_dict}
+
+            mapped: List[str] = []
+
+            for raw in values_list:
+                if not raw:
+                    continue
+                raw_str = str(raw).strip()
+
+                # a) to‘g‘ridan-to‘g‘ri match
+                if raw_str in normalized_dict:
+                    if raw_str not in mapped:
+                        mapped.append(raw_str)
+                    continue
+
+                # b) qavs ichini va qo‘shimcha belgilarni olib tashlash:
+                #    "прямой (жакет)" -> "прямой"
+                base = raw_str.split("(")[0].split("[")[0].strip()
+                base = base.rstrip(" .,-;")
+
+                if base in normalized_dict:
+                    if base not in mapped:
+                        mapped.append(base)
+                    continue
+
+                # c) lower-case match
+                lower_raw = raw_str.lower()
+                lower_base = base.lower()
+
+                if lower_raw in dict_lower_map:
+                    val = dict_lower_map[lower_raw]
+                    if val not in mapped:
+                        mapped.append(val)
+                    continue
+
+                if lower_base in dict_lower_map:
+                    val = dict_lower_map[lower_base]
+                    if val not in mapped:
+                        mapped.append(val)
+                    continue
+
+                # d) allowed value substring bo‘lsa:
+                #    "приталенный (юбка)" ichida "приталенный"
+                matched = False
+                for dv in normalized_dict:
+                    if dv.lower() in raw_str.lower():
+                        if dv not in mapped:
+                            mapped.append(dv)
+                        matched = True
+                        break
+                if matched:
+                    continue
+
+
+            # 4) LIMIT (max) ni qo‘llash
+            field_limits = limits.get(name) or {}
+            max_limit = field_limits.get("max") or field_limits.get("maxCount") or field_limits.get("max_count")
+            if isinstance(max_limit, int) and max_limit > 0 and len(mapped) > max_limit:
+                mapped = mapped[:max_limit]
+
+            char["value"] = mapped
+
         return characteristics
+
     
     def _load_prompt(self) -> str:
         """Load prompt from DB or fallback"""
@@ -162,10 +266,39 @@ class CharacteristicsGeneratorService(BaseOpenAIService):
 1. fixed_data: НЕПРИКОСНОВЕННЫЕ данные (НЕ МЕНЯТЬ!)
 2. image_description: Текстовое описание товара
 3. detected_colors: Уже определенные цвета (для контекста)
-4. allowed_values: Допустимые значения (выбирай ТОЛЬКО из них!)
+4. allowed_values: ДОПУСТИМЫЕ ЗНАЧЕНИЯ (для некоторых полей)
 5. limits: Лимиты (min/max количество значений)
 
-ПРАВИЛА ЗАПОЛНЕНИЯ:
+⚠️ СТРОГИЕ ПРАВИЛА ДЛЯ allowed_values:
+
+1. Для ЛЮБОГО поля, у которого есть allowed_values[name] (НЕ пустой список):
+   - value ДОЛЖЕН быть массивом строк.
+   - КАЖДЫЙ элемент массива ДОЛЖЕН БЫТЬ ТОЧНО ОДНИМ из allowed_values[name].
+   - НЕЛЬЗЯ:
+     - придумывать другие слова;
+     - склеивать несколько значений в одну строку;
+     - добавлять пояснения, скобки, запятые и описания.
+   - Примеры ПРАВИЛЬНО:
+       ["повседневный", "городской", "вечерний"]
+       ["костюм-двойка"]
+     Примеры НЕПРАВИЛЬНО:
+       ["повседневный, городской, вечерний (smart casual)"]
+       ["юбка-карандаш, миди, высокая талия"]
+       ["костюм-двойка (офисный вариант)"]
+
+2. ЕСЛИ нужно указать несколько значений из словаря:
+   - КАЖДОЕ значение должно быть отдельным элементом массива.
+   - Никаких запятых ВНУТРИ строки. Запятая используется только для разделения элементов массива в JSON.
+
+3. ЕСЛИ в allowed_values[name] НЕТ нужного слова:
+   - НЕ ПРИДУМЫВАЙ ничего.
+   - Лучше оставь поле пустым, чем использовать слово не из allowed_values.
+
+4. limits[name]:
+   - ЕСЛИ указан limits[name].max → НЕ добавляй больше значений, чем max.
+   - Например, если max=3 → value может быть максимум из 3 элементов.
+
+ПРАВИЛА ЗАПОЛНЕНИЯ (ОБЩИЕ):
 
 1. ЦВЕТ (Цвет):
    ❌ НЕ генерируй! Он уже в detected_colors
@@ -206,7 +339,7 @@ class CharacteristicsGeneratorService(BaseOpenAIService):
 
 ОБЯЗАТЕЛЬНЫЕ (required: true):
 - Заполни ВСЕГДА
-- Если не упомянуто - выбери наиболее вероятное из allowed_values
+- Если не упомянуто - выбери наиболее вероятное из allowed_values (если словарь есть)
 
 КРИТИЧНЫЕ ПРАВИЛА:
 1. "Модель брюк" - заполняй ТОЛЬКО если в описании четко упомянуты БРЮКИ
@@ -215,21 +348,7 @@ class CharacteristicsGeneratorService(BaseOpenAIService):
 4. "Модель костюма":
    - "двойка" = 2 предмета (пиджак+юбка ИЛИ пиджак+брюки)
    - "тройка" = 3 предмета (пиджак+брюки+жилет ИЛИ пиджак+юбка+жилет)
-5. Для ТЕКСТОВЫХ полей (без allowed_values) генерируй свободный текст
-
-ПРИМЕР ЛОГИКИ:
-Описание: "Костюм: пиджак и юбка"
-→ "Комплектация": ["пиджак", "юбка"]
-→ "Модель костюма": ["двойка"]
-→ "Модель юбки": ["карандаш"] (если описана)
-→ "Модель брюк": [] (НЕ заполняй - брюк нет!)
-
-Описание: "двубортная застежка с пуговицами"
-→ "Вид застежки": ["пуговицы"]
-→ "Особенности модели": ["двубортная"]
-
-Описание: "матовая ткань без блеска"
-→ "Фактура материала": ["матовая"]
+5. Для ТЕКСТОВЫХ полей (без allowed_values) можно использовать свободный текст, НО без перечислений внутри одной строки, если поле по смыслу предполагает отдельные значения.
 
 ФОРМАТ ОТВЕТА (JSON):
 {
@@ -253,11 +372,11 @@ class CharacteristicsGeneratorService(BaseOpenAIService):
 }
 
 ⚠️ КРИТИЧНО:
-- Заполняй МАКСИМУМ полей из описания
-- НЕ оставляй пустыми, если информация есть
-- Будь внимателен к деталям в тексте
-- НЕ придумывай то, чего нет в описании
+- ДЛЯ ПОЛЕЙ СО СЛОВАРЁМ: НЕ ВЫХОДИ ЗА ПРЕДЕЛЫ allowed_values И limits!
+- НЕ СОЕДИНЯЙ НЕСКОЛЬКО ЗНАЧЕНИЙ В ОДНУ СТРОКУ.
+- НЕ ПИШИ СКОБКИ, ЗАПЯТЫЕ И ОПИСАНИЯ ВНУТРИ ОДНОГО ЭЛЕМЕНТА.
+- НЕ ДОБАВЛЯЙ КОММЕНТАРИИ ИЛИ ПОЯСНЕНИЯ.
 
-НЕ ДОБАВЛЯЙТЕ НИКАКИХ КОММЕНТАРИЕВ ИЛИ ПОЯСНЕНИЙ!
+НЕ ДОБАВЛЯЙ НИКАКИХ КОММЕНТАРИЕВ ИЛИ ТЕКСТА ВНЕ JSON.
 ТОЛЬКО ЧИСТЫЙ JSON!
 """.strip()

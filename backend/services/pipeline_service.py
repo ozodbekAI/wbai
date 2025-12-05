@@ -142,7 +142,7 @@ class PipelineService:
         log("\nSTEP 1: Analyzing images...")
         
         image_description = self.image_analyzer.analyze_images(
-            photo_urls=photo_urls[:1],
+            photo_urls=photo_urls[:3],
             subject_name=subject_name,
             log_callback=log,
             target_char_names=generate_field_names,
@@ -208,6 +208,7 @@ class PipelineService:
             detected_colors=detected_colors,
             fixed_fields=fixed_fields,
             conditional_skip=conditional_skip,
+            conditional_fill=conditional_fill,  
         )
 
         ai_filled = sum(1 for c in ai_charcs_all if c.get("value"))
@@ -554,6 +555,7 @@ class PipelineService:
         detected_colors: List[str],
         fixed_fields: List[Dict[str, Any]],
         conditional_skip: Optional[List[Dict[str, Any]]],
+        conditional_fill: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Final characteristics:
@@ -680,4 +682,57 @@ class PipelineService:
                 }
             )
 
+        full_result = self._apply_conditional_fill_rules(
+            full_charcs=full_result,
+            conditional_fill=conditional_fill,
+        )
+
         return full_result
+    
+    def _apply_conditional_fill_rules(
+            self,
+            full_charcs: List[Dict[str, Any]],
+            conditional_fill: Optional[List[Dict[str, Any]]],
+        ) -> List[Dict[str, Any]]:
+            if not conditional_fill:
+                return full_charcs
+
+            values_by_name: Dict[str, List[str]] = {
+                ch.get("name"): ch.get("value", []) or []
+                for ch in full_charcs
+                if ch.get("name")
+            }
+
+            for meta in conditional_fill:
+                cond = meta.get("condition") or {}
+                action = cond.get("action")
+
+                if action != "fill":
+                    continue
+
+                target_name = meta.get("name") 
+                cond_field_name = cond.get("field") 
+                cond_values = cond.get("values") or []
+
+                if not target_name or not cond_field_name or not cond_values:
+                    continue
+
+                # boshqaruvchi maydon qiymatlari
+                control_values = {
+                    str(v).strip()
+                    for v in values_by_name.get(cond_field_name, [])
+                    if str(v).strip()
+                }
+                expected = {str(v).strip() for v in cond_values if str(v).strip()}
+
+                # Shart: control_values ∩ expected bo'lsa -> fill qilishga ruxsat
+                should_fill = bool(control_values & expected)
+
+                # Agar shart bajarilmasa -> target field majburan bo'shatiladi
+                if not should_fill:
+                    for ch in full_charcs:
+                        if ch.get("name") == target_name:
+                            ch["value"] = []
+                            break
+
+            return full_charcs
