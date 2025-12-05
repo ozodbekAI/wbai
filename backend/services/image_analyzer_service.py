@@ -36,7 +36,7 @@ class ImageAnalyzerService(BaseOpenAIService):
                         "Pay special attention to the following characteristics "
                         "and provide as much visual information as possible for each of them."
                     ),
-                    "target_characteristics": focus_fields,  # 👈 LLM ga beramiz
+                    "target_characteristics": focus_fields,  
                 },
                 photo_urls=photo_urls,
                 max_tokens=16000,

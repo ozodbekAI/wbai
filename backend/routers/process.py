@@ -1,9 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+import json
+from fastapi import APIRouter, Depends, HTTPException, Body
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
-from schemas.process import ProcessRequest
 from controllers.process_controller import ProcessController
 from core.dependencies import get_current_user
+from core.database import get_db_dependency
+from schemas.process import ProcessRequest
 
 router = APIRouter()
 process_controller = ProcessController()
@@ -11,12 +14,31 @@ process_controller = ProcessController()
 
 @router.post("")
 async def process_article(
-    request: ProcessRequest,
+    raw_body: dict | str = Body(...),
     current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db_dependency),
 ):
-    # async generator obyektini StreamingResponse'ga beramiz
+    if isinstance(raw_body, str):
+        try:
+            data = json.loads(raw_body)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid JSON in request body",
+            )
+    else:
+        data = raw_body
+
+    article = data.get("article")
+    if not article:
+        raise HTTPException(status_code=400, detail="Field 'article' is required")
+
     return StreamingResponse(
-        process_controller.process_stream(request.article),
+        process_controller.process_stream(
+            article=article,
+            user=current_user,
+            db=db,
+        ),
         media_type="text/event-stream",
     )
 

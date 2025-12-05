@@ -1,97 +1,135 @@
+# routers/history.py
+from typing import List, Optional, Any
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import List, Optional
 
 from core.dependencies import get_current_user
 from core.database import get_db_dependency
 from repositories.history_repository import HistoryRepository
-from schemas.history import HistoryResponse, StatisticsResponse
-
+from models.processing_history import ProcessingHistory
 
 router = APIRouter()
 
 
-@router.get("/", response_model=List[HistoryResponse])
-async def get_history(
-    skip: int = 0,
+class HistoryItem(BaseModel):
+    id: int
+    nm_id: Optional[int]
+    article: Optional[str]
+    subject_id: Optional[int]
+    subject_name: Optional[str]
+
+    status: str
+    validation_score: Optional[int]
+    title_score: Optional[int]
+    description_score: Optional[int]
+    processing_time: Optional[float]
+
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class HistoryListResponse(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: List[HistoryItem]
+
+
+class HistoryStatsResponse(BaseModel):
+    period_days: int
+    total_processed: int
+    completed: int
+    failed: int
+    success_rate: float
+    avg_processing_time: float
+    avg_validation_score: float
+
+
+def _get_user_id(current_user: Any) -> int:
+    """
+    get_current_user nima qaytarsa ham (User modeli yoki dict),
+    shu yerda user_id ni olamiz.
+    """
+    # SQLAlchemy / Pydantic model
+    user_id = getattr(current_user, "id", None)
+
+    # dict bo'lsa
+    if user_id is None and isinstance(current_user, dict):
+        user_id = current_user.get("id") or current_user.get("user_id")
+
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid authenticated user")
+
+    return int(user_id)
+
+
+@router.get("", response_model=HistoryListResponse)
+async def get_history_list(
     limit: int = 50,
+    offset: int = 0,
     status: Optional[str] = None,
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: Any = Depends(get_current_user),
 ):
-    """Get user's processing history"""
+    user_id = _get_user_id(current_user)
     repo = HistoryRepository(db)
-    history = repo.get_user_history(
-        user_id=current_user["user_id"],
+
+    items = repo.get_user_history(
+        user_id=user_id,
         limit=limit,
-        offset=skip,
-        status=status
+        offset=offset,
+        status=status,
     )
-    
-    return [
-        HistoryResponse(
-            id=h.id,
-            article=h.article,
-            nm_id=h.nm_id,
-            subject_name=h.subject_name,
-            status=h.status,
-            validation_score=h.validation_score,
-            title_score=h.title_score,
-            description_score=h.description_score,
-            processing_time=h.processing_time,
-            created_at=h.created_at.isoformat()
-        )
-        for h in history
-    ]
+
+    # umumiy sonni olish uchun – 1 yil oraliqda
+    total_stats = repo.get_statistics(user_id=user_id, days=365)
+    total = total_stats["total_processed"]
+
+    return HistoryListResponse(
+        total=total,
+        limit=limit,
+        offset=offset,
+        items=[HistoryItem.model_validate(i) for i in items],
+    )
 
 
-@router.get("/statistics", response_model=StatisticsResponse)
-async def get_statistics(
+# FRONTEND /api/history/stats ga so‘rov yuboradi
+@router.get("/stats", response_model=HistoryStatsResponse)
+async def get_history_stats(
     days: int = 30,
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: Any = Depends(get_current_user),
 ):
-    """Get user's processing statistics"""
+    user_id = _get_user_id(current_user)
     repo = HistoryRepository(db)
-    stats = repo.get_statistics(
-        user_id=current_user["user_id"],
-        days=days
-    )
-    return StatisticsResponse(**stats)
+    stats = repo.get_statistics(user_id=user_id, days=days)
+    return HistoryStatsResponse(**stats)
 
 
-@router.get("/{history_id}", response_model=HistoryResponse)
-async def get_history_detail(
+# Elementni alohida olish – pathni /item/{history_id} qilib o'zgartirdik
+@router.get("/item/{history_id}", response_model=HistoryItem)
+async def get_history_item(
     history_id: int,
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: Any = Depends(get_current_user),
 ):
-    """Get detailed history record"""
-    repo = HistoryRepository(db)
-    history = repo.get_by_id(history_id)
-    
-    if not history or history.user_id != current_user["user_id"]:
-        raise HTTPException(status_code=404, detail="History record not found")
-    
-    return HistoryResponse(
-        id=history.id,
-        article=history.article,
-        nm_id=history.nm_id,
-        subject_name=history.subject_name,
-        old_title=history.old_title,
-        new_title=history.new_title,
-        old_description=history.old_description,
-        new_description=history.new_description,
-        old_characteristics=history.old_characteristics,
-        new_characteristics=history.new_characteristics,
-        status=history.status,
-        validation_score=history.validation_score,
-        title_score=history.title_score,
-        description_score=history.description_score,
-        iterations_done=history.iterations_done,
-        processing_time=history.processing_time,
-        detected_colors=history.detected_colors,
-        photo_urls=history.photo_urls,
-        created_at=history.created_at.isoformat(),
-        error_message=history.error_message
+    user_id = _get_user_id(current_user)
+
+    obj = (
+        db.query(ProcessingHistory)
+        .filter(
+            ProcessingHistory.id == history_id,
+            ProcessingHistory.user_id == user_id,
+        )
+        .first()
     )
+
+    if not obj:
+        raise HTTPException(status_code=404, detail="History item not found")
+
+    return HistoryItem.model_validate(obj)

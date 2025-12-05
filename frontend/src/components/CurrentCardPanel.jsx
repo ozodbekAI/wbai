@@ -1,6 +1,5 @@
+// src/components/CurrentCardPanel.jsx
 import {
-  AlertTriangle,
-  CheckCircle2,
   Info,
   Film,
   Tag,
@@ -48,85 +47,18 @@ export default function CurrentCardPanel({
   const characteristicsCount = card.characteristics?.length || 0;
   const sizesCount = card.sizes?.length || 0;
 
+  // Допустимые/установленные
+  const stats = validation?.stats || {};
+  const photosUsed = stats.photos_used ?? photoCount;
+  const photosAllowed =
+    stats.photos_allowed ?? stats.photos_limit ?? null;
+  const charsUsed = stats.chars_used ?? characteristicsCount;
+  const charsAllowed =
+    stats.chars_allowed ?? stats.chars_limit ?? null;
+
   return (
     <section className="bg-white rounded-2xl shadow-2xl border border-gray-100 p-6 space-y-6">
-      {/* 0. Validation messages – HAR DOIM BOSHIDA */}
-      {(errors.length > 0 || warnings.length > 0) && (
-        <div className="rounded-2xl border border-red-200 bg-red-50/60 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-red-600" />
-              <div>
-                <h3 className="font-semibold text-red-800 text-sm">
-                  Проблемы валидации текущей карточки
-                </h3>
-                <p className="text-xs text-red-700/80">
-                  Исправьте ошибки и предупреждения, затем запустите AI генерацию.
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 text-xs font-medium">
-              <span className="px-2 py-1 rounded-full bg-white text-red-700 border border-red-200">
-                Ошибки: {errors.length}
-              </span>
-              <span className="px-2 py-1 rounded-full bg-white text-amber-700 border border-amber-200">
-                Предупреждения: {warnings.length}
-              </span>
-            </div>
-          </div>
-
-          {/* Xabarlar ro'yxati – scroll YO'Q */}
-          <div className="space-y-2 text-sm">
-            {messages.map((m, idx) => {
-              const isError = m.level === "error";
-              const Icon = isError ? AlertTriangle : CheckCircle2;
-              const colorClasses = isError
-                ? "border-red-200 bg-red-50 text-red-800"
-                : "border-amber-200 bg-amber-50 text-amber-800";
-
-              return (
-                <div
-                  key={idx}
-                  className={`border rounded-xl px-3 py-2 flex items-start gap-2 ${colorClasses}`}
-                >
-                  <Icon className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1">
-                    <div className="font-semibold text-xs sm:text-sm">
-                      {m.field}
-                      {m.code ? ` · ${m.code}` : ""}
-                    </div>
-                    <div className="text-xs mt-0.5">{m.message}</div>
-
-                    {m.details?.invalid_values?.length > 0 && (
-                      <div className="mt-1 text-xs">
-                        Неверные значения:{" "}
-                        <span className="font-medium">
-                          {m.details.invalid_values.join(", ")}
-                        </span>
-                      </div>
-                    )}
-
-                    {m.details?.suggestions &&
-                      Object.entries(m.details.suggestions).map(
-                        ([bad, sugg], i2) =>
-                          sugg?.length > 0 && (
-                            <div key={i2} className="mt-1 text-xs">
-                              Для «{bad}» WB рекомендует:{" "}
-                              <span className="font-medium">
-                                {sugg.join(", ")}
-                              </span>
-                            </div>
-                          )
-                      )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* 1. Header + generate */}
+      {/* Header + generate */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -142,7 +74,7 @@ export default function CurrentCardPanel({
             </span>
             {card.vendorCode && (
               <span className="text-xs px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                Артикул: {card.vendorCode}
+                Артикул поставщика: {card.vendorCode}
               </span>
             )}
           </div>
@@ -151,7 +83,9 @@ export default function CurrentCardPanel({
             {card.brand && (
               <div className="flex items-center gap-1">
                 <Tag className="w-4 h-4 text-gray-400" />
-                <span className="font-medium text-gray-800">{card.brand}</span>
+                <span className="font-medium text-gray-800">
+                  {card.brand}
+                </span>
               </div>
             )}
             <div className="flex items-center gap-1">
@@ -164,7 +98,9 @@ export default function CurrentCardPanel({
             </div>
             <div className="flex items-center gap-1">
               <Scale className="w-4 h-4 text-gray-400" />
-              <span>Вес: {card.dimensions?.weightBrutto ?? 0} кг</span>
+              <span>
+                Вес: {card.dimensions?.weightBrutto ?? 0} кг
+              </span>
             </div>
           </div>
 
@@ -185,16 +121,21 @@ export default function CurrentCardPanel({
           }`}
         >
           <Film className="w-5 h-5" />
-          {processingGenerate ? "Генерация нового варианта..." : "Сгенерировать новый вариант (AI)"}
+          {processingGenerate
+            ? "Генерация нового варианта..."
+            : "Сгенерировать новый вариант (AI)"}
         </button>
       </div>
 
-      {/* 2. Stats row – scroll yo‘q, oddiy grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      {/* Dashboards: 10/30, 34/47, 2 err / 2 warn */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl p-4 text-white shadow-md">
           <div className="flex items-center justify-between mb-2">
             <ImageIcon className="w-6 h-6 opacity-80" />
-            <span className="text-2xl font-bold">{photoCount}</span>
+            <span className="text-2xl font-bold">
+              {photosUsed}
+              {photosAllowed ? `/${photosAllowed}` : ""}
+            </span>
           </div>
           <p className="text-indigo-100 text-sm">Фотографий</p>
         </div>
@@ -202,17 +143,12 @@ export default function CurrentCardPanel({
         <div className="bg-gradient-to-br from-pink-500 to-rose-600 rounded-xl p-4 text-white shadow-md">
           <div className="flex items-center justify-between mb-2">
             <ListChecks className="w-6 h-6 opacity-80" />
-            <span className="text-2xl font-bold">{characteristicsCount}</span>
+            <span className="text-2xl font-bold">
+              {charsUsed}
+              {charsAllowed ? `/${charsAllowed}` : ""}
+            </span>
           </div>
           <p className="text-pink-100 text-sm">Характеристик</p>
-        </div>
-
-        <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-4 text-white shadow-md">
-          <div className="flex items-center justify-between mb-2">
-            <PackageOpen className="w-6 h-6 opacity-80" />
-            <span className="text-2xl font-bold">{sizesCount}</span>
-          </div>
-          <p className="text-emerald-100 text-sm">Размеров</p>
         </div>
 
         <div className="bg-gradient-to-br from-yellow-500 to-orange-500 rounded-xl p-4 text-white shadow-md">
@@ -226,9 +162,9 @@ export default function CurrentCardPanel({
         </div>
       </div>
 
-      {/* 3. Title + Description + meta */}
+      {/* Title + description + basic info */}
       <div className="grid grid-cols-1 xl:grid-cols-[2fr,1.2fr] gap-6">
-        {/* Left: editable title & description */}
+        {/* Left: title + description */}
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">
@@ -251,7 +187,9 @@ export default function CurrentCardPanel({
             </label>
             <textarea
               value={editableDescription}
-              onChange={(e) => onChangeDescription(e.target.value)}
+              onChange={(e) =>
+                onChangeDescription(e.target.value)
+              }
               className="w-full min-h-[160px] px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:border-purple-500 focus:bg-white outline-none transition-all resize-y"
             />
             <div className="mt-1 text-xs text-gray-500">
@@ -260,8 +198,8 @@ export default function CurrentCardPanel({
           </div>
         </div>
 
-        {/* Right: meta info */}
-        <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 space-y-3">
+        {/* Right: Основная информация + Размеры карточки товара */}
+        <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 space-y-4">
           <div className="flex items-center gap-2 mb-1">
             <Info className="w-4 h-4 text-gray-500" />
             <h3 className="font-semibold text-gray-800 text-sm">
@@ -271,60 +209,73 @@ export default function CurrentCardPanel({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-gray-700">
             <div>
-              <div className="text-gray-500 text-xs uppercase">Бренд</div>
+              <div className="text-gray-500 text-xs uppercase">
+                Бренд
+              </div>
               <div className="font-medium">{card.brand || "-"}</div>
             </div>
             <div>
-              <div className="text-gray-500 text-xs uppercase">VendorCode</div>
-              <div className="font-medium">{card.vendorCode || "-"}</div>
-            </div>
-            <div>
-              <div className="text-gray-500 text-xs uppercase">subjectID</div>
-              <div className="font-medium">{card.subjectID}</div>
-            </div>
-            <div>
-              <div className="text-gray-500 text-xs uppercase">nmUUID</div>
-              <div className="font-mono text-[10px] break-all text-gray-600">
-                {card.nmUUID}
+              <div className="text-gray-500 text-xs uppercase">
+                Категория
+              </div>
+              <div className="font-medium">
+                {card.subjectName || "-"}
               </div>
             </div>
             <div>
-              <div className="text-gray-500 text-xs uppercase">Нужен КИЗ</div>
-              <div className="font-medium">{card.needKiz ? "Да" : "Нет"}</div>
-            </div>
-            <div>
-              <div className="text-gray-500 text-xs uppercase">Ростовка</div>
+              <div className="text-gray-500 text-xs uppercase">
+                Артикул поставщика
+              </div>
               <div className="font-medium">
-                {card.characteristics?.find((c) => c.name === "Тип ростовки")
-                  ?.value?.join(", ") || "-"}
+                {card.vendorCode || "-"}
               </div>
             </div>
           </div>
 
-          {card.tags?.length > 0 && (
-            <div>
-              <div className="text-gray-500 text-xs uppercase mb-1">Теги</div>
-              <div className="flex flex-wrap gap-2">
-                {card.tags.map((t) => (
-                  <span
-                    key={t.id}
-                    className="text-xs px-2 py-1 rounded-full border bg-white flex items-center gap-1"
-                    style={{ borderColor: `#${t.color}` }}
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: `#${t.color}` }}
-                    />
-                    {t.name}
-                  </span>
-                ))}
+          {/* Размеры карточки товара */}
+          <div className="pt-3 mt-1 border-t border-gray-200">
+            <div className="text-gray-500 text-xs uppercase mb-2">
+              Размеры карточки товара
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <div className="text-gray-500 text-xs uppercase">
+                  Ширина (см)
+                </div>
+                <div className="font-medium">
+                  {card.dimensions?.width ?? "-"}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-xs uppercase">
+                  Высота (см)
+                </div>
+                <div className="font-medium">
+                  {card.dimensions?.height ?? "-"}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-xs uppercase">
+                  Длина (см)
+                </div>
+                <div className="font-medium">
+                  {card.dimensions?.length ?? "-"}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500 text-xs uppercase">
+                  Вес брутто (кг)
+                </div>
+                <div className="font-medium">
+                  {card.dimensions?.weightBrutto ?? "-"}
+                </div>
               </div>
             </div>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* 4. Photos */}
+      {/* Photos */}
       {photoCount > 0 && (
         <div>
           <div className="flex items-center gap-2 mb-2">
@@ -341,9 +292,9 @@ export default function CurrentCardPanel({
         </div>
       )}
 
-      {/* 5. Characteristics + Sizes – scroll YO‘Q, to‘liq ochiq */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Characteristics */}
+      {/* 5. Характеристики + Размеры */}
+      <div className="space-y-4">
+        {/* Характеристики – to‘liq kenglik + 4 ta ustun */}
         <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <ListChecks className="w-4 h-4 text-gray-500" />
@@ -352,7 +303,7 @@ export default function CurrentCardPanel({
             </h3>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
             {card.characteristics?.map((c) => (
               <div
                 key={c.id}
@@ -370,12 +321,14 @@ export default function CurrentCardPanel({
               </div>
             ))}
             {!card.characteristics?.length && (
-              <div className="text-xs text-gray-400">Нет характеристик</div>
+              <div className="text-xs text-gray-400">
+                Нет характеристик
+              </div>
             )}
           </div>
         </div>
 
-        {/* Sizes */}
+        {/* Размеры – pastda, to‘liq kenglik, gorizontal jadval */}
         <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <Ruler className="w-4 h-4 text-gray-500" />
@@ -384,40 +337,42 @@ export default function CurrentCardPanel({
             </h3>
           </div>
 
-          <table className="w-full text-xs text-gray-700 border-collapse">
-            <thead>
-              <tr className="text-left text-gray-500 border-b border-gray-200">
-                <th className="py-1 pr-2">chrtID</th>
-                <th className="py-1 pr-2">techSize</th>
-                <th className="py-1 pr-2">wbSize</th>
-                <th className="py-1 pr-2">SKUs</th>
-              </tr>
-            </thead>
-            <tbody>
-              {card.sizes?.map((s) => (
-                <tr key={s.chrtID} className="border-b border-gray-100">
-                  <td className="py-1 pr-2 font-mono">{s.chrtID}</td>
-                  <td className="py-1 pr-2">{s.techSize}</td>
-                  <td className="py-1 pr-2">{s.wbSize}</td>
-                  <td className="py-1 pr-2">
-                    <span className="px-2 py-0.5 rounded-full bg-white border border-gray-200">
-                      {s.skus?.length || 0}
-                    </span>
-                  </td>
+          <div className="w-full overflow-x-auto">
+            <table className="w-full min-w-[420px] text-xs text-gray-700 border-collapse">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-200">
+                  <th className="py-1 pr-2">chrtID</th>
+                  <th className="py-1 pr-2">techSize</th>
+                  <th className="py-1 pr-2">wbSize</th>
+                  <th className="py-1 pr-2">SKUs</th>
                 </tr>
-              ))}
-              {!card.sizes?.length && (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="py-2 text-center text-gray-400 text-xs"
-                  >
-                    Нет данных по размерам
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {card.sizes?.map((s) => (
+                  <tr key={s.chrtID} className="border-b border-gray-100">
+                    <td className="py-1 pr-2 font-mono">{s.chrtID}</td>
+                    <td className="py-1 pr-2">{s.techSize}</td>
+                    <td className="py-1 pr-2">{s.wbSize}</td>
+                    <td className="py-1 pr-2">
+                      <span className="px-2 py-0.5 rounded-full bg-white border border-gray-200">
+                        {s.skus?.length || 0}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {!card.sizes?.length && (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="py-2 text-center text-gray-400 text-xs"
+                    >
+                      Нет данных по размерам
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>

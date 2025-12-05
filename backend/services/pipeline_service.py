@@ -124,16 +124,14 @@ class PipelineService:
 
         generate_field_names = [f["name"] for f in generate_fields_for_ai if f.get("name")]
 
-        filtered_allowed_values = DataLoader.build_allowed_values_for_fields(generate_field_names)
+        # !!! NEW: Only from Ключевые_слова.json
+        allowed_values = DataLoader.build_allowed_values_from_keywords(generate_field_names)
 
+        # limits (unchanged)
         other_limits = DataLoader.load_limits(color_only=False)
-        filtered_limits = {
-            name: limits
-            for name, limits in other_limits.items()
-            if name in generate_field_names
-        }
+        filtered_limits = {name: other_limits.get(name, {}) for name in generate_field_names}
 
-        fields_with_dict = set(filtered_allowed_values.keys())
+        fields_with_dict = {name for name, vals in allowed_values.items() if vals}
         fields_without_dict = set(generate_field_names) - fields_with_dict
         
         if fields_without_dict:
@@ -144,11 +142,13 @@ class PipelineService:
         log("\nSTEP 1: Analyzing images...")
         
         image_description = self.image_analyzer.analyze_images(
-            photo_urls=photo_urls[:3],
+            photo_urls=photo_urls[:1],
             subject_name=subject_name,
             log_callback=log,
             target_char_names=generate_field_names,
         )
+
+        print(image_description)
 
         log(f"✅ Image analysis: {len(image_description)} chars")
         
@@ -182,13 +182,11 @@ class PipelineService:
         log(f"\n🔒 Locked fields (won't be generated): {len(locked_field_names)}")
         for field in list(locked_field_names)[:5]:
             log(f"  - {field}")
-
-        # STEP 3: AI characteristics (faqat generate_fields_for_ai) + validation
         batched_result = self._generate_and_validate_characteristics_batched(
             image_description=image_description,
-            charcs_meta_raw=generate_fields_for_ai,      # FAQAT AI uchun
+            charcs_meta_raw=generate_fields_for_ai,    
             limits=filtered_limits,
-            allowed_values=filtered_allowed_values,
+            allowed_values=allowed_values,
             detected_colors=detected_colors,
             fixed_data=fixed_data,
             subject_name=subject_name,
@@ -219,17 +217,40 @@ class PipelineService:
             if c.get("name") in [f.get("name") for f in fixed_fields] and c.get("value")
         )
         total_filled = sum(1 for c in merged_charcs if c.get("value"))
-        
-        time.sleep(1)
 
+        total_fields = len(charcs_meta_raw)
+        required_fields = sum(1 for m in charcs_meta_raw if m.get("required"))
+        optional_fields = total_fields - required_fields
+
+        name_to_required = {
+            m.get("name"): bool(m.get("required"))
+            for m in charcs_meta_raw
+            if m.get("name")
+        }
+
+        required_filled = 0
+        for ch in merged_charcs:
+            name = ch.get("name")
+            if not name or not name_to_required.get(name):
+                continue
+            val = ch.get("value")
+            if isinstance(val, list):
+                is_filled = any(str(v).strip() for v in val)
+            else:
+                is_filled = bool(str(val or "").strip())
+            if is_filled:
+                required_filled += 1
+
+        required_missing = required_fields - required_filled
+
+        ai_target_fields = len(generate_fields_for_ai)
         final_charcs = merged_charcs
         log(f"✅ Characteristics validated (batched score: {chars_score})")
 
         log("\n📝 STEP 4: Description generation + validation...")
         
         wb_description_result = self.description_service.generate_description(
-            characteristics=final_charcs,
-            title=None,
+            image_description=image_description,
             max_iterations=3
         )
         
@@ -249,17 +270,24 @@ class PipelineService:
 
         return {
             "nmID": card.get("nmID"),
+            "article": article,  
             "subjectID": subject_id,
+            "subjectName": subject_name,
+
+            "old_title": card.get("title"),
+            "old_description": card.get("description"),
+            "old_characteristics": card.get("characteristics") or [],
+
             "photo_urls": photo_urls,
-            
+
             "image_description": image_description,
-            
+
             "new_title": wb_title_result["new_title"],
             "new_description": wb_description_result["new_description"],
             "new_characteristics": final_charcs,
-            
+
             "detected_colors": detected_colors,
-            
+
             "validation_score": chars_score,
             "validation_issues": chars_issues,
             "iterations_done": chars_iterations,
@@ -273,15 +301,24 @@ class PipelineService:
             "description_warnings": wb_description_result["warnings"],
             "description_score": wb_description_result["score"],
             "description_attempts": wb_description_result["attempts"],
-            
+
             "fixed_row": fixed_row,
-            
+
             "stats": {
                 "fixed_fields": len(fixed_fields),
                 "conditional_skip": len(conditional_skip),
                 "conditional_fill": len(conditional_fill),
                 "generated_fields": len(generate_fields_for_ai),
-                "total_fields": len(charcs_meta_raw),
+                "total_fields": total_fields,
+
+                "required_fields": required_fields,
+                "optional_fields": optional_fields,
+                "required_filled": required_filled,
+                "required_missing": required_missing,
+                "ai_target_fields": ai_target_fields,
+                "ai_filled": ai_filled,
+                "fixed_filled": fixed_filled,
+                "total_filled": total_filled,
             }
         }
 

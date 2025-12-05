@@ -5,7 +5,7 @@ DESCRIPTION_SYSTEM_PROMPT = """
 Сформировать ИДЕАЛЬНОЕ ОПИСАНИЕ карточки по требованиям WB.
 
 ДАННЫЕ:
-- tech_description: техническое описание
+- image_description: техническое описание
 - characteristics: характеристики
 - title: название
 

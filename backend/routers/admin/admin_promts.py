@@ -1,3 +1,4 @@
+# routers/admin/admin_promts.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -7,7 +8,6 @@ from core.dependencies import get_current_user
 from core.database import get_db_dependency
 from repositories.promt_repository import PromptRepository
 from services.promnt_loader import PromptLoaderService
-
 
 router = APIRouter()
 
@@ -36,7 +36,7 @@ class PromptResponse(BaseModel):
     is_active: bool
     created_at: str
     updated_at: str
-    
+
     class Config:
         from_attributes = True
 
@@ -59,11 +59,11 @@ class PromptVersionInfo(BaseModel):
 @router.get("/prompts", response_model=List[PromptResponse])
 async def get_all_prompts(
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     repo = PromptRepository(db)
     prompts = repo.get_all_prompts()
-    
+
     return [
         PromptResponse(
             id=p.id,
@@ -84,14 +84,14 @@ async def get_all_prompts(
 async def get_prompt(
     prompt_type: str,
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     repo = PromptRepository(db)
     prompt = repo.get_active_prompt(prompt_type)
-    
+
     if not prompt:
         raise HTTPException(status_code=404, detail=f"Промпт '{prompt_type}' не найден")
-    
+
     return PromptResponse(
         id=prompt.id,
         prompt_type=prompt.prompt_type,
@@ -109,18 +109,18 @@ async def get_prompt(
 async def preview_full_prompt(
     prompt_type: str,
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     try:
         prompt_loader = PromptLoaderService(db)
         full_prompt = prompt_loader.get_full_prompt(prompt_type)
-        
+
         repo = PromptRepository(db)
         prompt = repo.get_active_prompt(prompt_type)
-        
+
         if not prompt:
             raise HTTPException(status_code=404, detail=f"Промпт '{prompt_type}' не найден")
-        
+
         components = {
             "system_prompt": prompt.system_prompt,
             "strict_rules": prompt.strict_rules,
@@ -128,12 +128,12 @@ async def preview_full_prompt(
             "static_rules": "Yes" if "СТРОГИЕ ЗАПРЕТЫ" in full_prompt else "No",
             "response_format": "Yes" if "ФОРМАТ ОТВЕТА" in full_prompt else "No",
         }
-        
+
         return PromptFullPreview(
             prompt_type=prompt_type,
             version=prompt.version,
             full_prompt=full_prompt,
-            components=components
+            components=components,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка формирования промпта: {str(e)}")
@@ -143,17 +143,18 @@ async def preview_full_prompt(
 async def create_prompt(
     data: PromptCreate,
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     repo = PromptRepository(db)
-    
+
     try:
         prompt = repo.create_prompt(
             prompt_type=data.prompt_type,
             system_prompt=data.system_prompt,
             strict_rules=data.strict_rules,
             examples=data.examples,
-            created_by=current_user.get("username")
+            created_by_id=current_user.get("id"),
+            created_by_username=current_user.get("username"),
         )
         return PromptResponse(
             id=prompt.id,
@@ -175,18 +176,18 @@ async def update_prompt(
     prompt_type: str,
     data: PromptUpdate,
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     repo = PromptRepository(db)
-    
+
     try:
         prompt = repo.update_prompt(
             prompt_type=prompt_type,
             system_prompt=data.system_prompt,
             strict_rules=data.strict_rules,
             examples=data.examples,
-            updated_by=current_user.get("username"),
-            change_reason=data.change_reason
+            updated_by_username=current_user.get("username"),
+            change_reason=data.change_reason,
         )
         return PromptResponse(
             id=prompt.id,
@@ -209,17 +210,17 @@ async def update_prompt(
 async def delete_prompt(
     prompt_type: str,
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     repo = PromptRepository(db)
     prompt = repo.get_active_prompt(prompt_type)
-    
+
     if not prompt:
         raise HTTPException(status_code=404, detail=f"Промпт '{prompt_type}' не найден")
-    
+
     prompt.is_active = False
     db.commit()
-    
+
     return {"message": f"Промпт '{prompt_type}' деактивирован"}
 
 
@@ -227,11 +228,11 @@ async def delete_prompt(
 async def get_prompt_versions(
     prompt_type: str,
     db: Session = Depends(get_db_dependency),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     repo = PromptRepository(db)
     versions = repo.get_prompt_versions(prompt_type)
-    
+
     return [
         PromptVersionInfo(
             id=v.id,
@@ -243,62 +244,105 @@ async def get_prompt_versions(
         for v in versions
     ]
 
+@router.delete("/prompts/{prompt_type}")
+async def delete_prompt(
+    prompt_type: str,
+    db: Session = Depends(get_db_dependency),
+    current_user: dict = Depends(get_current_user),
+):
+    repo = PromptRepository(db)
+    try:
+        prompt = repo.set_prompt_active(prompt_type, False)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {
+        "message": f"Промпт '{prompt_type}' деактивирован",
+        "prompt_type": prompt.prompt_type,
+        "is_active": prompt.is_active,
+    }
+
+
+@router.post("/prompts/{prompt_type}/activate", response_model=PromptResponse)
+async def activate_prompt(
+    prompt_type: str,
+    db: Session = Depends(get_db_dependency),
+    current_user: dict = Depends(get_current_user),
+):
+    repo = PromptRepository(db)
+
+    try:
+        prompt = repo.set_prompt_active(prompt_type, True)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return PromptResponse(
+        id=prompt.id,
+        prompt_type=prompt.prompt_type,
+        system_prompt=prompt.system_prompt,
+        strict_rules=prompt.strict_rules,
+        examples=prompt.examples,
+        version=prompt.version,
+        is_active=prompt.is_active,
+        created_at=prompt.created_at.isoformat() if prompt.created_at else "",
+        updated_at=prompt.updated_at.isoformat() if prompt.updated_at else "",
+    )
 
 @router.get("/prompts/types/available")
 async def get_available_prompt_types(
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     return {
         "types": [
             {
                 "type": "title_generator",
                 "description": "Генерация заголовков (title) для карточек",
-                "category": "title"
+                "category": "title",
             },
             {
                 "type": "title_validator",
                 "description": "Валидация заголовков",
-                "category": "title"
+                "category": "title",
             },
             {
                 "type": "title_refiner",
                 "description": "Исправление заголовков",
-                "category": "title"
+                "category": "title",
             },
             {
                 "type": "description_generator",
                 "description": "Генерация описаний (description) для карточек",
-                "category": "description"
+                "category": "description",
             },
             {
                 "type": "description_validator",
                 "description": "Валидация описаний",
-                "category": "description"
+                "category": "description",
             },
             {
                 "type": "description_refiner",
                 "description": "Исправление описаний",
-                "category": "description"
+                "category": "description",
             },
             {
                 "type": "characteristics_generator",
                 "description": "Генерация характеристик",
-                "category": "characteristics"
+                "category": "characteristics",
             },
             {
                 "type": "characteristics_validator",
                 "description": "Валидация характеристик",
-                "category": "characteristics"
+                "category": "characteristics",
             },
             {
                 "type": "characteristics_refiner",
                 "description": "Исправление характеристик",
-                "category": "characteristics"
+                "category": "characteristics",
             },
             {
                 "type": "color_detector",
                 "description": "Определение цветов на фото",
-                "category": "color"
+                "category": "color",
             },
         ]
     }

@@ -1,6 +1,13 @@
+// src/components/FinalPanel.jsx
 import { CheckCircle, Upload, Download } from "lucide-react";
 
-export default function FinalPanel({ article, result, finalData, onSubmit, onDownload }) {
+export default function FinalPanel({
+  article,
+  result,
+  finalData,
+  onSubmit,
+  onDownload,
+}) {
   if (!result || !finalData) return null;
 
   return (
@@ -12,20 +19,32 @@ export default function FinalPanel({ article, result, finalData, onSubmit, onDow
 
       <div className="bg-white/10 backdrop-blur rounded-xl p-6 mb-6 space-y-4">
         <div>
-          <span className="font-semibold text-purple-100">Артикул:</span>
+          <span className="font-semibold text-purple-100">
+            Артикул:
+          </span>
           <p className="mt-1 text-white">{article}</p>
         </div>
         <div>
-          <span className="font-semibold text-purple-100">Название:</span>
+          <span className="font-semibold text-purple-100">
+            Название:
+          </span>
           <p className="mt-1 text-white">{finalData.title}</p>
         </div>
         <div>
-          <span className="font-semibold text-purple-100">Характеристик выбрано:</span>
-          <p className="mt-1 text-white">{finalData.characteristics.length}</p>
+          <span className="font-semibold text-purple-100">
+            Характеристик выбрано:
+          </span>
+          <p className="mt-1 text-white">
+            {finalData.characteristics.length}
+          </p>
         </div>
         <div>
-          <span className="font-semibold text-purple-100">Validation Score:</span>
-          <p className="mt-1 text-white">{result.validation_score}/100</p>
+          <span className="font-semibold text-purple-100">
+            Рейтинг карточки:
+          </span>
+          <p className="mt-1 text-white">
+            {result.validation_score}/100
+          </p>
         </div>
       </div>
 

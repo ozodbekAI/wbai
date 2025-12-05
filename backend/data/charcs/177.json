@@ -461,12 +461,13 @@
     {
       "charcID": 57021,
       "name": "Модель юбки",
-      "required": false,
-      "unitName": "",
-      "maxCount": 1,
-      "popular": true,
-      "charcType": 1,
-      "note": "Генерируется из справочника"
+      "is_conditional": true,
+      "condition": {
+        "field": "Тип низа",
+        "values": ["Юбка"],
+        "action": "fill"
+      },
+      "note": "Заполняется только если Тип низа = Юбка"
     },
     {
       "charcID": 57556,
@@ -481,12 +482,13 @@
     {
       "charcID": 85580,
       "name": "Модель брюк",
-      "required": false,
-      "unitName": "",
-      "maxCount": 1,
-      "popular": true,
-      "charcType": 1,
-      "note": "Генерируется из справочника"
+      "is_conditional": true,
+      "condition": {
+        "field": "Тип низа",
+        "values": ["Брюки"],
+        "action": "fill"
+      },
+      "note": "Заполняется только если Тип низа = Брюки"
     },
     {
       "charcID": 204557,
