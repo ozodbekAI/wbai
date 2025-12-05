@@ -31,7 +31,12 @@ jobs:
       - name: Ensure directory exists and sync files
         run: |
           ssh ${{ env.USER }}@${{ env.SERVER_IP }} "mkdir -p ${{ env.SERVER_DIR }}"
-          rsync -avz --delete ./ ${{ env.USER }}@${{ env.SERVER_IP }}:${{ env.SERVER_DIR }}
+          rsync -avz --delete \
+            --exclude '.env' \
+            --exclude 'venv/' \
+            --exclude 'backend/.env' \
+            --exclude 'frontend/.env' \
+            ./ ${{ env.USER }}@${{ env.SERVER_IP }}:${{ env.SERVER_DIR }}
 
       - name: Backend - install deps & restart service
         run: |
