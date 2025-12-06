@@ -1,52 +1,42 @@
 // src/components/CompareCharacteristics.jsx
-import React, { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Check,
   Edit3,
   ArrowRightLeft,
-  Copy,
-  Wand2,
+  X,
+  BookOpen,   // BookOpenText o‘rniga
+  Loader2,
 } from "lucide-react";
 
-/**
- * props:
- *  - oldChars: [{ name, value }]
- *  - newChars: [{ name, value }]
- *  - finalValues: { [name]: value }
- *  - onChangeFinalValue: (name, valueArrayOrString) => void
- */
+import { api } from "../api/client";
+
 export default function CompareCharacteristics({
   newChars = [],
   oldChars = [],
   finalValues = {},
   onChangeFinalValue,
+  token,
 }) {
-  const renderVal = (v) => {
-    if (Array.isArray(v)) {
-      return v.join(", ");
-    }
-    if (v === null || v === undefined) return "";
-    return String(v);
-  };
+  // value helper
+  const renderVal = (v) =>
+    Array.isArray(v) ? v.join(", ") : String(v ?? "");
 
-  const normalizeValueArray = (v) => {
-    if (Array.isArray(v)) {
-      return v.map((x) => String(x).trim()).filter(Boolean);
-    }
-    if (v === null || v === undefined) return [];
-    const s = String(v).trim();
-    if (!s) return [];
-    // "a, b, c" -> ["a","b","c"]
-    if (s.includes(",")) {
-      return s
-        .split(",")
-        .map((x) => x.trim())
-        .filter(Boolean);
-    }
-    return [s];
-  };
+  // xavfsiz allNames
+  const allNames = useMemo(() => {
+    const names = new Set();
 
-  // ism bo‘yicha indexlar
+    newChars.forEach((c) => {
+      if (c && c.name) names.add(c.name);
+    });
+    oldChars.forEach((c) => {
+      if (c && c.name) names.add(c.name);
+    });
+
+    return Array.from(names);
+  }, [newChars, oldChars]);
+
+  // ism bo‘yicha indexlar – guard bilan
   const byName = (list) =>
     list.reduce((acc, c) => {
       if (!c || !c.name) return acc;
@@ -54,164 +44,368 @@ export default function CompareCharacteristics({
       return acc;
     }, {});
 
-  const oldByName = useMemo(() => byName(oldChars), [oldChars]);
   const newByName = useMemo(() => byName(newChars), [newChars]);
+  const oldByName = useMemo(() => byName(oldChars), [oldChars]);
 
-  const allNames = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...Object.keys(oldByName),
-          ...Object.keys(newByName),
-        ])
-      ).sort((a, b) => a.localeCompare(b)),
-    [oldByName, newByName]
-  );
+  // Lokal state – dictionary, dropdown va inputlar
+  // dictCache: { [name]: { values: string[], min: number|null, max: number|null } }
+  const [dictCache, setDictCache] = useState({});
+  const [openField, setOpenField] = useState(null); // qaysi field uchun slovar ochilgan
+  const [loadingField, setLoadingField] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [drafts, setDrafts] = useState({}); // { [name]: current input text }
 
-  const handleTakeOld = (name) => {
-    const oldVal = oldByName[name]?.value ?? [];
-    const norm = normalizeValueArray(oldVal);
-    onChangeFinalValue?.(name, norm);
+  const getFinalArray = (name) => {
+    const v = finalValues?.[name];
+    if (Array.isArray(v)) return v;
+    if (!v) return [];
+    return String(v)
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean);
   };
 
-  const handleTakeNew = (name) => {
-    const newVal = newByName[name]?.value ?? [];
-    const norm = normalizeValueArray(newVal);
-    onChangeFinalValue?.(name, norm);
+  const canAddMore = (name) => {
+    const entry = dictCache[name];
+    const maxLimit = entry?.max;
+
+    if (typeof maxLimit !== "number" || maxLimit <= 0) {
+      return true; // limit yo'q
+    }
+
+    const current = getFinalArray(name);
+    return current.length < maxLimit;
   };
 
-  const handleManualChange = (name, raw) => {
-    const norm = normalizeValueArray(raw);
-    onChangeFinalValue?.(name, norm);
+  const handleAddManual = (name) => {
+    const raw = (drafts[name] || "").trim();
+    if (!raw) return;
+
+    if (!canAddMore(name)) {
+      // xohlasang shu yerda toast/log qo'yish mumkin
+      console.warn("Max limit reached for", name);
+      return;
+    }
+
+    const current = getFinalArray(name);
+    if (!current.includes(raw)) {
+      onChangeFinalValue(name, [...current, raw]);
+    }
+    setDrafts((prev) => ({ ...prev, [name]: "" }));
+  };
+
+  const handleRemoveValue = (name, value) => {
+    const current = getFinalArray(name);
+    onChangeFinalValue(
+      name,
+      current.filter((v) => v !== value)
+    );
+  };
+
+  const handleSelectKeyword = (name, value) => {
+    if (!canAddMore(name)) {
+      console.warn("Max limit reached for", name);
+      return;
+    }
+
+    const current = getFinalArray(name);
+    if (!current.includes(value)) {
+      onChangeFinalValue(name, [...current, value]);
+    }
+  };
+
+  const handleToggleDict = async (name) => {
+    if (!token) return;
+
+    if (openField === name) {
+      // yopish
+      setOpenField(null);
+      setSearchTerm("");
+      return;
+    }
+
+    setOpenField(name);
+    setSearchTerm(drafts[name] || "");
+
+    if (!dictCache[name]) {
+      try {
+        setLoadingField(name);
+        const data = await api.keywords.byName(token, name);
+        // data: { values: [], min: int|null, max: int|null }
+        setDictCache((prev) => ({
+          ...prev,
+          [name]: {
+            values: Array.isArray(data?.values) ? data.values : [],
+            min:
+              typeof data?.min === "number" ? data.min : null,
+            max:
+              typeof data?.max === "number" ? data.max : null,
+          },
+        }));
+      } catch (err) {
+        console.error("Failed to load keywords for", name, err);
+      } finally {
+        setLoadingField(null);
+      }
+    }
+  };
+
+  const filteredKeywordsFor = (name) => {
+    const entry = dictCache[name];
+    const all = entry?.values || [];
+    if (!searchTerm) return all;
+    const q = searchTerm.toLowerCase();
+    return all.filter((v) => v.toLowerCase().includes(q));
   };
 
   return (
     <section className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
-      {/* header */}
-      <div className="bg-gradient-to-r from-violet-500 to-purple-500 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ArrowRightLeft className="w-5 h-5 text-white" />
-          <h3 className="font-semibold text-white text-sm">
-            Сравнение характеристик
-          </h3>
-        </div>
-        <div className="text-[11px] text-violet-100">
-          Слева – текущие, по центру – AI, справа – итоговое значение
-        </div>
+      <div className="bg-gradient-to-r from-violet-500 to-purple-500 px-6 py-4 flex items-center justify-between">
+        <h3 className="font-bold text-white text-lg flex items-center gap-2">
+          <ArrowRightLeft className="w-5 h-5" />
+          Сравнение характеристик
+        </h3>
+        <p className="text-violet-100 text-xs">
+          Старые значения WB, новые AI и финальный выбор
+        </p>
       </div>
 
-      {/* table header */}
-      <div className="px-4 pt-3 pb-2 border-b border-gray-100 text-[11px] font-medium text-gray-500 grid grid-cols-[1.2fr,1fr,1fr,1.1fr] gap-3">
-        <div>Характеристика</div>
-        <div className="text-center">Текущие</div>
-        <div className="text-center">AI</div>
-        <div className="text-center">Итог</div>
-      </div>
+      <div className="p-4">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-xs">
+            <thead>
+              <tr className="text-[11px] text-gray-500 bg-gray-50">
+                <th className="text-left px-3 py-2 font-semibold w-[22%]">
+                  Характеристика
+                </th>
+                <th className="text-left px-3 py-2 font-semibold w-[22%]">
+                  Текущее WB
+                </th>
+                <th className="text-left px-3 py-2 font-semibold w-[22%]">
+                  AI (новое)
+                </th>
+                <th className="text-left px-3 py-2 font-semibold w-[34%]">
+                  Итоговое значение
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {allNames.map((name) => {
+                const oldC = oldByName[name];
+                const newC = newByName[name];
 
-      {/* body */}
-      <div className="max-h-[360px] overflow-y-auto">
-        {!allNames.length ? (
-          <div className="px-4 py-8 text-xs text-gray-400 text-center">
-            Характеристики недоступны.
-          </div>
-        ) : (
-          allNames.map((name) => {
-            const oldValArr = normalizeValueArray(
-              oldByName[name]?.value ?? []
-            );
-            const newValArr = normalizeValueArray(
-              newByName[name]?.value ?? []
-            );
+                const oldVal = oldC?.value;
+                const newVal = newC?.value;
 
-            const finalValRaw =
-              finalValues?.[name] ??
-              newValArr ??
-              oldValArr;
-            const finalValArr = normalizeValueArray(finalValRaw);
+                const finalArr = getFinalArray(name);
+                const isChanged =
+                  renderVal(oldVal) !== renderVal(newVal) &&
+                  renderVal(newVal) !== "";
 
-            const oldStr = renderVal(oldValArr);
-            const newStr = renderVal(newValArr);
-            const finalStr = renderVal(finalValArr);
+                const isDictOpen = openField === name;
+                const isLoadingDict = loadingField === name;
+                const keywords = filteredKeywordsFor(name);
 
-            const isChanged =
-              finalStr !== oldStr && finalStr !== "";
+                const dictEntry = dictCache[name] || {};
+                const minLimit = dictEntry.min ?? null;
+                const maxLimit = dictEntry.max ?? null;
+                const currentCount = finalArr.length;
 
-            return (
-              <div
-                key={name}
-                className={`px-4 py-2.5 border-b border-gray-50 text-[11px] grid grid-cols-[1.2fr,1fr,1fr,1.1fr] gap-3 items-start ${
-                  isChanged ? "bg-violet-50/40" : "bg-white"
-                }`}
-              >
-                {/* Name */}
-                <div className="pr-2">
-                  <div className="font-semibold text-gray-900 truncate">
-                    {name}
-                  </div>
-                  {isChanged && (
-                    <div className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-violet-700 bg-violet-100/80 px-1.5 py-0.5 rounded-full">
-                      <Wand2 className="w-3 h-3" />
-                      <span>Изменено AI</span>
-                    </div>
-                  )}
-                </div>
+                return (
+                  <tr
+                    key={name}
+                    className="border-t border-gray-100 align-top hover:bg-gray-50/60 transition-colors"
+                  >
+                    {/* Name */}
+                    <td className="px-3 py-3">
+                      <div className="flex flex-col gap-0.5">
+                        <div className="font-medium text-[12px] text-gray-900">
+                          {name}
+                        </div>
+                        {isChanged && (
+                          <div className="inline-flex items-center gap-1 text-[10px] text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full w-fit">
+                            <Edit3 className="w-3 h-3" />
+                            <span>AI предлагает изменить</span>
+                          </div>
+                        )}
+                      </div>
+                    </td>
 
-                {/* Old */}
-                <div className="text-[11px] text-gray-700">
-                  {oldStr ? (
-                    <span className="inline-flex px-2 py-0.5 rounded-full bg-gray-100">
-                      {oldStr}
-                    </span>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                </div>
+                    {/* Old WB */}
+                    <td className="px-3 py-3">
+                      <div className="text-[11px] text-gray-700 whitespace-pre-line">
+                        {renderVal(oldVal) || (
+                          <span className="text-gray-400 italic">
+                            — нет данных —
+                          </span>
+                        )}
+                      </div>
+                    </td>
 
-                {/* New (AI) */}
-                <div className="text-[11px] text-purple-800">
-                  {newStr ? (
-                    <span className="inline-flex px-2 py-0.5 rounded-full bg-purple-50 border border-purple-100">
-                      {newStr}
-                    </span>
-                  ) : (
-                    <span className="text-gray-400">—</span>
-                  )}
-                </div>
+                    {/* New AI */}
+                    <td className="px-3 py-3">
+                      <div
+                        className={
+                          "text-[11px] whitespace-pre-line " +
+                          (isChanged
+                            ? "text-violet-700"
+                            : "text-gray-700")
+                        }
+                      >
+                        {renderVal(newVal) || (
+                          <span className="text-gray-400 italic">
+                            — без изменений —
+                          </span>
+                        )}
+                      </div>
+                    </td>
 
-                {/* Final */}
-                <div className="flex flex-col gap-1">
-                  <input
-                    className="w-full text-[11px] border border-gray-200 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-violet-500 focus:border-violet-500 bg-white"
-                    value={finalStr}
-                    onChange={(e) =>
-                      handleManualChange(name, e.target.value)
-                    }
-                    placeholder="Итоговое значение..."
-                  />
+                    {/* Final + keywords + chips */}
+                    <td className="px-3 py-3">
+                      <div className="flex flex-col gap-1.5">
+                        {/* Chips */}
+                        <div className="flex flex-wrap gap-1 items-center">
+                          {finalArr.length === 0 && (
+                            <span className="text-[11px] text-gray-400 italic">
+                              Значение не выбрано
+                            </span>
+                          )}
 
-                  <div className="flex flex-wrap gap-1 justify-end">
-                    <button
-                      type="button"
-                      onClick={() => handleTakeOld(name)}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-200 text-gray-600 hover:bg-gray-50"
-                    >
-                      <Copy className="w-3 h-3" />
-                      <span>Текущее</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleTakeNew(name)}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-violet-200 text-violet-700 hover:bg-violet-50"
-                    >
-                      <Check className="w-3 h-3" />
-                      <span>AI</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        )}
+                          {finalArr.map((v) => (
+                            <span
+                              key={v}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-violet-100 bg-violet-50 text-[11px] text-violet-800"
+                            >
+                              <span>{v}</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleRemoveValue(name, v)
+                                }
+                                className="hover:text-violet-900"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+
+                          {(minLimit || maxLimit) && (
+                            <span className="ml-auto text-[10px] text-gray-500">
+                              Выбрано {currentCount}
+                              {typeof maxLimit === "number" &&
+                                ` / ${maxLimit}`}
+                              {typeof minLimit === "number" &&
+                                currentCount < minLimit && (
+                                  <span className="text-red-500 ml-1">
+                                    (мин. {minLimit})
+                                  </span>
+                                )}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Input + slovar button */}
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            className="flex-1 border border-gray-200 rounded-lg px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-violet-400 focus:border-violet-400 bg-white"
+                            placeholder="Введите значение или начните печатать для фильтра словаря…"
+                            value={drafts[name] || ""}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [name]: val,
+                              }));
+                              if (openField === name) {
+                                setSearchTerm(val);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleAddManual(name);
+                              }
+                            }}
+                          />
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleDict(name)}
+                            className={
+                              "inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] " +
+                              (isDictOpen
+                                ? "border-violet-500 bg-violet-50 text-violet-700"
+                                : "border-gray-200 bg-gray-50 text-gray-700 hover:border-violet-400 hover:bg-violet-50 hover:text-violet-700")
+                            }
+                          >
+                            {isLoadingDict ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <BookOpen className="w-3 h-3" />
+                            )}
+                            <span>словарь</span>
+                          </button>
+                        </div>
+
+                        {/* Dropdown – keywords list */}
+                        {isDictOpen && (
+                          <div className="mt-1 border border-violet-100 bg-white rounded-xl shadow-lg max-h-48 overflow-y-auto text-[11px]">
+                            {!dictCache[name] ||
+                            (dictCache[name] &&
+                              (dictCache[name].values || [])
+                                .length === 0) ? (
+                              <div className="px-3 py-2 text-gray-400">
+                                Справочник для этой характеристики
+                                пустой или не найден. Можно вводить
+                                любое значение вручную.
+                              </div>
+                            ) : (
+                              <>
+                                {keywords.length === 0 ? (
+                                  <div className="px-3 py-2 text-gray-400">
+                                    По вашему фильтру ничего не найдено.
+                                  </div>
+                                ) : (
+                                  keywords.map((val) => {
+                                    const isSelected =
+                                      finalArr.includes(val);
+                                    return (
+                                      <button
+                                        key={val}
+                                        type="button"
+                                        onClick={() =>
+                                          handleSelectKeyword(
+                                            name,
+                                            val
+                                          )
+                                        }
+                                        className={
+                                          "w-full text-left px-3 py-1.5 border-b border-violet-50 last:border-b-0 hover:bg-violet-50 transition-colors flex items-center justify-between " +
+                                          (isSelected
+                                            ? "bg-violet-50/80"
+                                            : "")
+                                        }
+                                      >
+                                        <span>{val}</span>
+                                        {isSelected && (
+                                          <Check className="w-3 h-3 text-violet-600" />
+                                        )}
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   );

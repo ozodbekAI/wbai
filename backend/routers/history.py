@@ -51,14 +51,9 @@ class HistoryStatsResponse(BaseModel):
 
 
 def _get_user_id(current_user: Any) -> int:
-    """
-    get_current_user nima qaytarsa ham (User modeli yoki dict),
-    shu yerda user_id ni olamiz.
-    """
-    # SQLAlchemy / Pydantic model
+
     user_id = getattr(current_user, "id", None)
 
-    # dict bo'lsa
     if user_id is None and isinstance(current_user, dict):
         user_id = current_user.get("id") or current_user.get("user_id")
 
