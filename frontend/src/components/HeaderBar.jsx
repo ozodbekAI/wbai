@@ -1,11 +1,18 @@
 // src/components/HeaderBar.jsx
-import { LogOut, Settings, Package, Download } from "lucide-react";
+import {
+  LogOut,
+  Settings,
+  Package,
+  Download,
+  Image as ImageIcon,
+} from "lucide-react";
 
 export default function HeaderBar({
   username,
   onLogout,
   onOpenPrompts,
-  onDownloadExcel, // optional
+  onOpenPhotoSettings,
+  onDownloadExcel,
 }) {
   return (
     <header className="bg-white/80 backdrop-blur-xl border-b border-gray-200 sticky top-0 z-50 shadow-sm">
@@ -37,6 +44,16 @@ export default function HeaderBar({
             </button>
           )}
 
+          {onOpenPhotoSettings && (
+            <button
+              onClick={onOpenPhotoSettings}
+              className="px-4 py-2 bg-gradient-to-r from-blue-50 to-cyan-50 text-blue-700 hover:from-blue-100 hover:to-cyan-100 rounded-xl font-medium transition-all flex items-center gap-2 border border-blue-200"
+            >
+              <ImageIcon className="w-4 h-4" />
+              Фото-шаблоны
+            </button>
+          )}
+
           <button
             onClick={onOpenPrompts}
             className="px-4 py-2 bg-gradient-to-r from-purple-50 to-pink-50 text-purple-700 hover:from-purple-100 hover:to-pink-100 rounded-xl font-medium transition-all flex items-center gap-2 border border-purple-200"
@@ -46,9 +63,7 @@ export default function HeaderBar({
           </button>
 
           <div className="px-4 py-2 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl border border-purple-200">
-            <p className="text-sm font-medium text-purple-700">
-              👤 {username}
-            </p>
+            <p className="text-sm font-medium text-purple-700">👤 {username}</p>
           </div>
 
           <button

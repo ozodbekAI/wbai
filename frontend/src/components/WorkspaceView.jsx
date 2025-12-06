@@ -1,6 +1,15 @@
-// src/components/WorkspaceView.jsx
+// ============================================
+// FILE 3: src/components/WorkspaceView.jsx
+// COMPLETE VERSION - Copy this entire file
+// ============================================
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import {
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 
 import HeaderBar from "./HeaderBar";
 import SearchPanel from "./SearchPanel";
@@ -15,10 +24,14 @@ import FinalPanel from "./FinalPanel";
 import HistorySidebar from "./HistorySidebar";
 import PromptsPanel from "./PromptsPanel";
 import ValidationIssuesPanel from "./ValidationIssuesPanel";
+import PhotoAiEditor from "./PhotoAiEditor";
+import PhotoTemplatesPanel from "./PhotoTemplatesPanel";
+import PhotosGrid from "./PhotosGrid";
 
 import { api } from "../api/client";
 
 export default function WorkspaceView({ token, username, onLogout }) {
+  const [cardPhotos, setCardPhotos] = useState([]);
   const [article, setArticle] = useState("");
   const [error, setError] = useState("");
 
@@ -40,8 +53,13 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const [historyStats, setHistoryStats] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // PROMPTS ADMIN
+  // PROMPTS / PHOTO TEMPLATES
   const [promptsOpen, setPromptsOpen] = useState(false);
+  const [photoTemplatesOpen, setPhotoTemplatesOpen] = useState(false);
+
+  // PHOTO STUDIO (AI modal)
+  const [photoStudioOpen, setPhotoStudioOpen] = useState(false);
+  const fileInputRef = useRef(null);
 
   const pushLog = (msg) => {
     setLogs((prev) => [
@@ -69,6 +87,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
     resetForNewRun();
     setCard(null);
     setCurrentValidation(null);
+    setCardPhotos([]);
 
     try {
       const art = article.trim();
@@ -82,6 +101,13 @@ export default function WorkspaceView({ token, username, onLogout }) {
 
       setCard(data.card);
       setCurrentValidation(data.response || null);
+
+      // Photos dan URLlarni to'g'ri olish
+      const photosFromCard = (data.card?.photos || [])
+        .map((p) => p.big || p.hq || p.square || p.c246x328 || p.c516x688 || p)
+        .filter(Boolean);
+      setCardPhotos(photosFromCard);
+
       pushLog("Текущая карточка WB получена");
     } catch (e) {
       setError(e.message);
@@ -124,7 +150,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
     setFinalCharValues(fv);
   };
 
-  /** /api/process – AI generatsiya (SSE + oddiy JSON) */
+  /** /api/process – AI generatsiya */
   const handleGenerate = async () => {
     if (!article.trim() || !card) return;
     setProcessing(true);
@@ -336,7 +362,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
     console.log("Download Excel for:", article || card?.nmID);
   };
 
-  /** HISTORY – API’dan olish */
+  /** HISTORY – API'dan olish */
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
@@ -355,7 +381,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
     }
   }, [token]);
 
-  // sahifa ochilganda history ni avtomatik yuklaymiz
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
@@ -363,12 +388,39 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const handleOpenPrompts = () => setPromptsOpen(true);
   const handleClosePrompts = () => setPromptsOpen(false);
 
+  const handleOpenPhotoTemplates = () => setPhotoTemplatesOpen(true);
+  const handleClosePhotoTemplates = () => setPhotoTemplatesOpen(false);
+
+  /** PhotosGrid uchun handlerlar */
+  const handleOpenUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFilesChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const newUrls = files.map((f) => URL.createObjectURL(f));
+    setCardPhotos((prev) => [...prev, ...newUrls]);
+
+    e.target.value = "";
+  };
+
+  const handleReorderPhotos = (newOrder) => {
+    setCardPhotos(newOrder);
+  };
+
+  const handleSavePhotosOrder = (newOrder) => {
+    console.log("Save photo order:", newOrder);
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       <HeaderBar
         username={username}
         onLogout={onLogout}
         onOpenPrompts={handleOpenPrompts}
+        onOpenPhotoSettings={handleOpenPhotoTemplates}
         onDownloadExcel={handleDownloadExcel}
       />
 
@@ -399,6 +451,24 @@ export default function WorkspaceView({ token, username, onLogout }) {
               processingGenerate={processing}
             />
 
+            {/* PHOTOS GRID */}
+            <PhotosGrid
+              urls={cardPhotos}
+              onGenerate={() => setPhotoStudioOpen(true)}
+              onReorder={handleReorderPhotos}
+              onSaveOrder={handleSavePhotosOrder}
+              onUploadClick={handleOpenUpload}
+            />
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleFilesChange}
+            />
+
             {card && result && (
               <>
                 <CompareTitle
@@ -422,6 +492,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
                   newChars={result.new_characteristics || []}
                   finalValues={finalCharValues}
                   onChangeFinalValue={handleChangeFinalChar}
+                  token={token}
                 />
               </>
             )}
@@ -439,7 +510,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
             )}
           </div>
 
-          {/* RIGHT COLUMN – tepada Ошибки, pastda История */}
+          {/* RIGHT COLUMN */}
           <div className="flex flex-col gap-4">
             <ValidationIssuesPanel validation={combinedValidation} />
 
@@ -459,6 +530,23 @@ export default function WorkspaceView({ token, username, onLogout }) {
         onClose={handleClosePrompts}
         token={token}
       />
+
+      {/* PHOTO TEMPLATES ADMIN PANEL */}
+      <PhotoTemplatesPanel
+        open={photoTemplatesOpen}
+        onClose={handleClosePhotoTemplates}
+        token={token}
+      />
+
+      {/* PHOTO AI EDITOR MODAL */}
+      {photoStudioOpen && cardPhotos.length > 0 && (
+        <PhotoAiEditor
+          token={token}
+          urls={cardPhotos}
+          onAddPhoto={(newUrl) => setCardPhotos((prev) => [...prev, newUrl])}
+          onClose={() => setPhotoStudioOpen(false)}
+        />
+      )}
     </div>
   );
 }

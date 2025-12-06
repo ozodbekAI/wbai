@@ -15,9 +15,8 @@ class Settings(BaseSettings):
 
     SECRET_KEY: str = "your-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440 
 
-    # Admin default credentials (startupda DBga yozish uchun)
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin"
 
@@ -37,6 +36,8 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "postgres"
 
     DATABASE_URL: Optional[str] = None
+
+    KIE_API_KEY: str = "your-kie-api-key"
 
     BASE_DIR: Path = Path(__file__).resolve().parent.parent
     DATA_DIR: Path = BASE_DIR / "data"
