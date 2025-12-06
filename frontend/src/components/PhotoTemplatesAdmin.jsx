@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Plus, Save, Trash2, Loader2, Image as ImageIcon } from "lucide-react";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 // Oddiy helper
 const buildUrl = (path) => `${API_BASE}${path}`;
