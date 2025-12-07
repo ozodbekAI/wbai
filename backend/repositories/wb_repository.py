@@ -8,14 +8,19 @@ class WBRepository:
     BASE_URL = "https://content-api.wildberries.ru"
 
     def _get_headers(self) -> Dict[str, str]:
+        """
+        Barcha WB API so'rovlari uchun umumiy header.
+        """
         if not settings.WB_API_KEY:
             raise ValueError("WB_API_KEY not set")
 
         return {
-            "Authorization": settings.WB_API_KEY,
+            "Authorization": settings.WB_API_KEY,  # WB key bu yerga to'g'ri qo'yilgan bo'lishi kerak
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+
+    # ================== SUBJECT CHARCS ==================
 
     def get_subject_charcs(self, subject_id: int) -> List[Dict[str, Any]]:
         """
@@ -70,17 +75,9 @@ class WBRepository:
                     "limit": limit,
                 },
                 "filter": {
-                    # MUHIM: majburan stringga aylantiramiz
                     "textSearch": str(article),
                     "withPhoto": with_photo,
-                    # Agar kerak bo'lsa bu yerga qo'shimcha filterlarni ham qo'shish mumkin:
-                    # "allowedCategoriesOnly": True,
-                    # "brands": [...],
-                    # "objectIDs": [...],
-                    # "tagIDs": [...],
-                    # "imtID": ...
                 },
-                # sort qo'yish shart emas, lekin xohlasang qo'yib qo'yish mumkin:
                 "sort": {
                     "ascending": False
                 },
@@ -94,7 +91,6 @@ class WBRepository:
 
         data = resp.json()
 
-        # content/v2/get/cards/list odatda "error" qaytarmaydi, lekin xavfsizlik uchun tekshiramiz
         if isinstance(data, dict) and data.get("error"):
             raise ValueError(f"WB API error: {data.get('errorText')}")
 
@@ -133,3 +129,83 @@ class WBRepository:
                     return card
 
         return cards[0]
+
+    def update_cards(self, cards: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        POST /content/v2/cards/update
+
+        cards – WB dokumentatsiyadagi array:
+        [
+          {
+            "nmID": ...,
+            "vendorCode": "...",
+            "brand": "...",
+            "title": "...",
+            "description": "...",
+            "dimensions": {...},
+            "characteristics": [...],
+            "sizes": [...]
+          },
+          ...
+        ]
+        """
+        url = f"{self.BASE_URL}/content/v2/cards/update"
+        headers = self._get_headers()
+        r = requests.post(url, headers=headers, json=cards, timeout=30)
+
+        if r.status_code != 200:
+            raise ValueError(f"WB update error {r.status_code}: {r.text}")
+
+        data = r.json()
+        if isinstance(data, dict) and data.get("error"):
+            raise ValueError(f"WB update failed: {data.get('errorText')}")
+        return data
+
+    # ================== MEDIA (FOTO/VIDEO) ==================
+
+    def upload_media_file(
+        self,
+        nm_id: int,
+        photo_number: int,
+        file_bytes: bytes,
+        filename: str,
+        content_type: str = "image/jpeg",
+    ) -> Dict[str, Any]:
+        """
+        POST /content/v3/media/file
+        Faylni WB media API ga yuklaydi.
+        """
+        url = f"{self.BASE_URL}/content/v3/media/file"
+        headers = self._get_headers()
+        headers["X-Nm-Id"] = str(nm_id)
+        headers["X-Photo-Number"] = str(photo_number)
+
+        files = {"uploadfile": (filename, file_bytes, content_type)}
+        r = requests.post(url, headers=headers, files=files, timeout=60)
+
+        if r.status_code != 200:
+            raise ValueError(f"WB upload failed {r.status_code}: {r.text}")
+
+        data = r.json()
+        if isinstance(data, dict) and data.get("error"):
+            raise ValueError(f"WB upload error: {data.get('errorText')}")
+        return data
+
+    def save_media_state(self, nm_id: int, urls: List[str]) -> Dict[str, Any]:
+        """
+        POST /content/v3/media/save
+        urls: ["https://.../1.jpg", "https://.../2.jpg", ...]
+        """
+        url = f"{self.BASE_URL}/content/v3/media/save"
+        headers = self._get_headers()
+        payload = {"nmID": nm_id, "data": urls}
+
+        r = requests.post(url, headers=headers, json=payload, timeout=30)
+
+        if r.status_code != 200:
+            raise ValueError(f"WB media/save error {r.status_code}: {r.text}")
+
+        data = r.json()
+        if isinstance(data, dict) and data.get("error"):
+            raise ValueError(f"WB media/save failed: {data.get('errorText')}")
+        return data

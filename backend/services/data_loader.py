@@ -24,26 +24,24 @@ class DataLoader:
     def filter_characteristics_by_type(
         charcs_meta: List[Dict[str, Any]],
         subject_id: int,
-        gender: str = None
+        gender: str = None,
     ) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict]]:
         """
-        Filter characteristics into 4 groups:
-        1. fixed_fields - only from Excel/config, never generate
-        2. conditional_skip - skip based on conditions (NEVER generate)
-        3. conditional_fill - fill only if condition met
-        4. generate_fields - normal AI generation
+        1. fixed_fields      – faqat Excel/config (is_fixed)
+        2. conditional_skip  – umuman ishlatilmaydiganlar (action=skip, sistemnye)
+        3. conditional_fill  – shart bajarilganda qoladiganlar (action=fill)
+        4. generate_fields   – AI uchun generatsiya qilinadiganlar
         """
         try:
             config = DataLoader.load_subject_config(subject_id)
 
-            # charcID lar uchun int/str har ikkisini support qilamiz
+            # charcID bo‘yicha mapping (int/str ikkala variant)
             config_chars: Dict[Any, Dict[str, Any]] = {}
             for c in config.get("characteristics", []):
                 cid = c.get("charcID")
                 if cid is None:
                     continue
                 config_chars[cid] = c
-                # int/str cross-key
                 try:
                     config_chars[int(cid)] = c
                 except Exception:
@@ -55,59 +53,81 @@ class DataLoader:
                     pass
 
         except FileNotFoundError:
-            # If config not found, treat all as generate_fields
+            # config yo‘q bo‘lsa – hammasini AI generatsiya qiladi
             return [], [], [], charcs_meta
-        
-        fixed_fields = []
-        conditional_skip = []
-        conditional_fill = []
-        generate_fields = []
-        
+
+        fixed_fields: List[Dict[str, Any]] = []
+        conditional_skip: List[Dict[str, Any]] = []
+        conditional_fill: List[Dict[str, Any]] = []
+        generate_fields: List[Dict[str, Any]] = []
+
         for meta in charcs_meta:
             char_id = meta.get("charcID")
             name = meta.get("name")
-            
-            # Skip color - handled separately
+
+            # Цвет alohida pipeline’da
             if name == "Цвет":
                 continue
-            
+
             config_char = config_chars.get(char_id)
-            
+
+            # config’da yo‘q -> oddiy generatsiya
             if not config_char:
-                # Not in config = generate normally
                 generate_fields.append(meta)
                 continue
 
+            # 1) FIKSED FIELD (faqat Excel)
             if config_char.get("is_fixed", False):
                 fixed_fields.append(meta)
                 continue
-            
+
+            # 2) Color – alohida servis
             if config_char.get("is_color", False):
                 continue
 
+            # 3) Shartli maydonlar (is_conditional)
             if config_char.get("is_conditional", False):
-                condition = config_char.get("condition", {})
+                condition = config_char.get("condition") or {}
                 action = condition.get("action", "skip")
-                
-                if action == "skip":
-                    conditional_skip.append(meta)
-                    continue
-                elif action == "fill":
-                    cond_field = condition.get("field")
-                    cond_values = condition.get("values", [])
-                    
-                    if cond_field == "Пол" and gender in cond_values:
-                        generate_fields.append(meta)
-                    else:
-                        conditional_skip.append(meta)
-                    continue
-                else:
 
-                    conditional_skip.append(meta)
+                # meta’ni condition bilan boyitib yuboramiz,
+                # chunki _apply_conditional_fill_rules shuni o‘qiydi
+                meta_with_cond = dict(meta)
+                meta_with_cond["condition"] = condition
+
+                # 3.1 action = skip -> hech qachon generatsiya qilinmaydi
+                if action == "skip":
+                    conditional_skip.append(meta_with_cond)
                     continue
-            
+
+                # 3.2 action = fill -> shart bajarilganda qoldiramiz
+                if action == "fill":
+                    conditional_fill.append(meta_with_cond)
+
+                    cond_field = condition.get("field")
+                    cond_values = condition.get("values") or []
+
+                    # OPTIMIZATSIYA: agar shart "Пол = Дети" va biz genderni bilsak,
+                    # lekin u mos kelmasa – AIga ham yubormaymiz
+                    if cond_field == "Пол" and gender is not None and cond_values:
+                        if gender not in cond_values:
+                            # masalan, "Любимые герои" faqat bolalar uchun
+                            # -> bu card uchun butunlay skip
+                            continue
+
+                    # qolgan barcha holatlarda (Тип низа, boshqalar)
+                    # AIga yuboramiz, lekin final bosqichda
+                    # _apply_conditional_fill_rules shart bo‘yicha tozalab beradi
+                    generate_fields.append(meta)
+                    continue
+
+                # 3.3 noma’lum action -> xavfsiz varianti: skip
+                conditional_skip.append(meta_with_cond)
+                continue
+
+            # 4) Oddiy generatsiya maydoni
             generate_fields.append(meta)
-        
+
         return fixed_fields, conditional_skip, conditional_fill, generate_fields
     
     @staticmethod
