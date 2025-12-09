@@ -340,7 +340,12 @@ async def get_available_prompt_types(
                 "category": "characteristics",
             },
             {
-                "type": "color_detector",
+                "type": "color_detector_parent",
+                "description": "Определение цветов на фото",
+                "category": "color",
+            },
+            {
+                "type": "color_detector_names",
                 "description": "Определение цветов на фото",
                 "category": "color",
             },
