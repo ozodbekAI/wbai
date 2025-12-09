@@ -165,7 +165,6 @@ class DescriptionService:
             "history": validation_result.get("history", []),
         }
 
-    # ===================== OPENAI LOW-LEVEL ===================== #
 
     def _call_openai_description(
         self,
@@ -173,26 +172,13 @@ class DescriptionService:
         payload: Dict[str, Any],
         max_retries: int = 3
     ) -> Dict[str, Any]:
-        """
-        FIXED: Full debug logging + bo'sh javob retry
-        """
+
         user_prompt = (
             "Сгенерируй строго JSON.\n"
             "Формат:\n"
             '{ "description": "..." }\n\n'
             f"ДАННЫЕ:\n{json.dumps(payload, ensure_ascii=False)}"
         )
-
-        print("\n" + "="*60)
-        print("📤 SENDING TO OPENAI (DESCRIPTION)")
-        print("="*60)
-        print(f"Model: {settings.OPENAI_MODEL}")
-        print(f"System prompt length: {len(system_prompt)}")
-        print(f"\n--- SYSTEM PROMPT ---")
-        print(system_prompt[:500] + "..." if len(system_prompt) > 500 else system_prompt)
-        print(f"\n--- USER PROMPT ---")
-        print(user_prompt[:800] + "..." if len(user_prompt) > 800 else user_prompt)
-        print("="*60 + "\n")
 
         for attempt in range(1, max_retries + 1):
             try:
@@ -210,14 +196,7 @@ class DescriptionService:
 
                 raw = response.choices[0].message.content
                 
-                print("\n" + "="*60)
-                print("📥 OPENAI RESPONSE (DESCRIPTION)")
-                print("="*60)
-                print(f"Finish reason: {response.choices[0].finish_reason}")
-                print(f"Raw content length: {len(raw) if raw else 0}")
-                print(f"\n--- RAW CONTENT ---")
-                print(raw if raw else "[EMPTY]")
-                print("="*60 + "\n")
+
                 
                 if not raw or not raw.strip():
                     print(f"⚠️ Попытка {attempt}: пустой ответ от OpenAI")
@@ -229,7 +208,6 @@ class DescriptionService:
 
                 raw = raw.strip()
 
-                # Markdown блоков tozalash
                 if raw.startswith("```json"):
                     raw = raw[7:]
                 elif raw.startswith("```"):
@@ -246,11 +224,8 @@ class DescriptionService:
                         continue
                     return {"description": ""}
 
-                # JSON parse
                 try:
                     data = json.loads(raw)
-                    print(f"✅ JSON parsed successfully")
-                    print(f"Keys in response: {list(data.keys())}")
                     
                     if "description" not in data:
                         print("⚠️ Key 'description' missing, adding empty")
@@ -261,21 +236,17 @@ class DescriptionService:
                     return data
                     
                 except json.JSONDecodeError as e:
-                    print(f"⚠️ Попытка {attempt}: JSON decode error - {e}")
-                    print(f"Raw content preview: {raw[:300]}...")
                     if attempt < max_retries:
                         time.sleep(2)
                         continue
                     return {"description": ""}
 
             except Exception as e:
-                print(f"❌ Попытка {attempt} - OpenAI API error: {type(e).__name__}: {e}")
                 if attempt < max_retries:
                     time.sleep(2)
                     continue
                 raise
 
-        print("⚠️ Все попытки исчерпаны, возвращаю пустое описание")
         return {"description": ""}
 
 
@@ -286,9 +257,6 @@ class DescriptionService:
         key: str,
         retries: int = 3,
     ) -> Dict[str, Any]:
-        """
-        FIXED: Full debug logging + bo'sh javob retry
-        """
         fallback = {key: ""}
 
         print("\n" + "="*60)
@@ -338,7 +306,6 @@ class DescriptionService:
                     print(f"❌ Возвращаю fallback: {fallback}")
                     return fallback
 
-                # Markdown tozalash
                 if raw.startswith("```json"):
                     raw = raw[7:]
                 elif raw.startswith("```"):
@@ -355,7 +322,6 @@ class DescriptionService:
                         continue
                     return fallback
 
-                # JSON decode
                 try:
                     data = json.loads(raw)
                     print(f"✅ JSON parsed successfully")
@@ -388,7 +354,6 @@ class DescriptionService:
         return fallback
 
 
-    # ===================== FALLBACK PROMPTS ===================== #
 
     def _get_fallback_description_prompt(self) -> str:
         return """

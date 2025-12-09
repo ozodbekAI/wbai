@@ -13,7 +13,6 @@ from repositories.cards_repository import CardsRepository
 from repositories.fixed_repository import FixedRepository
 from repositories.wb_repository import WBRepository
 from services.data_loader import DataLoader
-from core.config import settings
 
 
 class PipelineService:
@@ -80,248 +79,402 @@ class PipelineService:
             if log_callback:
                 log_callback(msg)
 
-        log("📥 Loading card data (via WB API)...")
+        try:
+            log("📥 Loading card data (via WB API)...")
+            card = self._load_card_from_api(article)
 
-        card = self._load_card_from_api(article)
+            subject_id = card["subjectID"]
+            subject_name = card.get("subjectName") or card.get("subject", {}).get("name")
+            
+            log(f"📋 Subject ID: {subject_id}, Name: {subject_name}")
 
-        subject_name = card.get("subjectName") or card.get("subject", {}).get("name")
-        
-        
-        fixed_row = self.fixed_repo.get_by_artikul(article)
-        fixed_data = self._build_fixed_data_dict(fixed_row)
-        
-        photo_urls = self.cards_repo.extract_photo_urls(card)
-        subject_id = card["subjectID"]
-        charcs_meta_raw = self.wb_repo.get_subject_charcs(subject_id)
+            from services.data_loader import DataLoader
+            
+            is_valid, error_msg = DataLoader.validate_subject_config(subject_id)
+            
+            if not is_valid:
+                available_ids = DataLoader.get_available_subject_ids()
+                
+                error_response = {
+                    "status": "error",
+                    "error_type": "subject_config_not_found",
+                    "article": article,
+                    "subject_id": subject_id,
+                    "subject_name": subject_name,
+                    "message": error_msg,
+                    "available_subject_ids": available_ids[:20],
+                    "total_available": len(available_ids),
+                    "suggestion": f"Create file: data/charcs/{subject_id}.json"
+                }
+                
+                log(f"❌ ERROR: {error_msg}")
+                log(f"💡 Available subject IDs (showing first 10): {available_ids[:10]}")
+                
+                return error_response
+            
 
-        gender = self._extract_gender_from_card(card)
-        
-        log(f"📋 Subject ID: {subject_id}, Gender: {gender or 'unknown'}")
-        
-        fixed_fields, conditional_skip, conditional_fill, generate_fields = \
-            self.data_loader.filter_characteristics_by_type(charcs_meta_raw, subject_id, gender)
+            fixed_row = self.fixed_repo.get_by_artikul(article)
+            fixed_data = self._build_fixed_data_dict(fixed_row)
+            
+            photo_urls = self.cards_repo.extract_photo_urls(card)
+            charcs_meta_raw = self.wb_repo.get_subject_charcs(subject_id)
 
-        fixed_field_names = {f.get("name") for f in fixed_fields if f.get("name")}
-        skip_field_names = {f.get("name") for f in conditional_skip if f.get("name")}
-        excel_fixed_names = set(fixed_data.keys())  
+            gender = self._extract_gender_from_card(card)
+            
 
-        locked_field_names = fixed_field_names | skip_field_names | excel_fixed_names
+            fixed_fields, conditional_skip, conditional_fill, generate_fields = \
+                self.data_loader.filter_characteristics_by_type(charcs_meta_raw, subject_id, gender)
 
-        generate_fields_for_ai = [
-            meta for meta in generate_fields
-            if meta.get("name") and meta.get("name") not in locked_field_names
-        ]
+            fixed_field_names = {f.get("name") for f in fixed_fields if f.get("name")}
+            skip_field_names = {f.get("name") for f in conditional_skip if f.get("name")}
+            excel_fixed_names = set(fixed_data.keys())
 
-        if log_callback:
-            log_callback(
-                f"Locked fields (fixed+skip+excel): {len(locked_field_names)} "
-                f"({', '.join(list(locked_field_names)[:10]) if locked_field_names else 'none'})"
+            locked_field_names = fixed_field_names | skip_field_names | excel_fixed_names
+
+            generate_fields_for_ai = [
+                meta for meta in generate_fields
+                if meta.get("name") and meta.get("name") not in locked_field_names
+            ]
+
+
+            generate_field_names = [f["name"] for f in generate_fields_for_ai if f.get("name")]
+
+            allowed_values = DataLoader.build_allowed_values_from_keywords(generate_field_names)
+            other_limits = DataLoader.load_limits(color_only=False)
+            filtered_limits = {name: other_limits.get(name, {}) for name in generate_field_names}
+
+            fields_with_dict = {name for name, vals in allowed_values.items() if vals}
+            fields_without_dict = set(generate_field_names) - fields_with_dict
+            
+            if fields_without_dict:
+                log(f"ℹ️  Text fields (no dictionary): {len(fields_without_dict)}")
+            log("\n🖼️  STEP 1: Analyzing images...")
+            
+            image_description = self.image_analyzer.analyze_images(
+                photo_urls=photo_urls[:2],
+                subject_name=subject_name,
+                log_callback=log,
+                target_char_names=generate_field_names,
             )
-            log_callback(
-                f"Fields for AI generation: {len(generate_fields_for_ai)} "
-                f"(all generate_fields in config: {len(generate_fields)})"
+
+            log(f"✅ Image analysis: {len(image_description)} chars")
+
+            log("\n🎨 STEP 2: Color detection + validation...")
+            
+            color_result = self.color_service.detect_colors_from_text(
+                image_description=image_description,
+                log_callback=log
             )
-
-        generate_field_names = [f["name"] for f in generate_fields_for_ai if f.get("name")]
-
-        # !!! NEW: Only from Ключевые_слова.json
-        allowed_values = DataLoader.build_allowed_values_from_keywords(generate_field_names)
-
-        # limits (unchanged)
-        other_limits = DataLoader.load_limits(color_only=False)
-        filtered_limits = {name: other_limits.get(name, {}) for name in generate_field_names}
-
-        fields_with_dict = {name for name, vals in allowed_values.items() if vals}
-        fields_without_dict = set(generate_field_names) - fields_with_dict
-        
-        if fields_without_dict:
-            log(f"ℹText fields (no dictionary): {len(fields_without_dict)}")
-            for field in sorted(fields_without_dict)[:3]:
-                log(f"    - {field}")
-
-        log("\nSTEP 1: Analyzing images...")
-        
-        image_description = self.image_analyzer.analyze_images(
-            photo_urls=photo_urls[:3],
-            subject_name=subject_name,
-            log_callback=log,
-            target_char_names=generate_field_names,
-        )
-
-        print(image_description)
-
-        log(f"✅ Image analysis: {len(image_description)} chars")
-        
-        log("\n🎨 STEP 2: Color detection + validation...")
-        
-        color_result = self.color_service.detect_colors_from_text(
-            image_description=image_description,
-            log_callback=log
-        )
-        
-        if isinstance(color_result, tuple):
-            detected_colors, allowed_colors = color_result
-        else:
-            detected_colors = color_result
-            allowed_colors = []
-        
-        if isinstance(detected_colors, dict):
-            detected_colors = detected_colors.get("colors", [])
-        elif not isinstance(detected_colors, list):
-            detected_colors = []
-
-        normalized_colors = []
-        for c in detected_colors:
-            cs = str(c).strip()
-            if cs and cs not in normalized_colors:
-                normalized_colors.append(cs)
-        detected_colors = normalized_colors[:5]
-        
-        log(f"✅ Colors detected: {detected_colors}")
-
-        log(f"\n🔒 Locked fields (won't be generated): {len(locked_field_names)}")
-        for field in list(locked_field_names)[:5]:
-            log(f"  - {field}")
-        batched_result = self._generate_and_validate_characteristics_batched(
-            image_description=image_description,
-            charcs_meta_raw=generate_fields_for_ai,    
-            limits=filtered_limits,
-            allowed_values=allowed_values,
-            detected_colors=detected_colors,
-            fixed_data=fixed_data,
-            subject_name=subject_name,
-            log_callback=log,
-            all_field_names=generate_field_names,
-            conditional_skip=conditional_skip,
-            locked_fields=list(locked_field_names),
-        )
-
-        ai_charcs_all = batched_result["characteristics"]
-        chars_score = batched_result["score"]
-        chars_iterations = batched_result["iterations"]
-        chars_issues = batched_result["issues"]
-
-        merged_charcs = self._build_full_characteristics(
-            charcs_meta_raw=charcs_meta_raw,
-            fixed_row=fixed_row,
-            ai_charcs=ai_charcs_all,
-            detected_colors=detected_colors,
-            fixed_fields=fixed_fields,
-            conditional_skip=conditional_skip,
-            conditional_fill=conditional_fill,  
-        )
-
-        ai_filled = sum(1 for c in ai_charcs_all if c.get("value"))
-        fixed_filled = sum(
-            1
-            for c in merged_charcs
-            if c.get("name") in [f.get("name") for f in fixed_fields] and c.get("value")
-        )
-        total_filled = sum(1 for c in merged_charcs if c.get("value"))
-
-        total_fields = len(charcs_meta_raw)
-        required_fields = sum(1 for m in charcs_meta_raw if m.get("required"))
-        optional_fields = total_fields - required_fields
-
-        name_to_required = {
-            m.get("name"): bool(m.get("required"))
-            for m in charcs_meta_raw
-            if m.get("name")
-        }
-
-        required_filled = 0
-        for ch in merged_charcs:
-            name = ch.get("name")
-            if not name or not name_to_required.get(name):
-                continue
-            val = ch.get("value")
-            if isinstance(val, list):
-                is_filled = any(str(v).strip() for v in val)
+            
+            if isinstance(color_result, tuple):
+                detected_colors, allowed_colors = color_result
             else:
-                is_filled = bool(str(val or "").strip())
-            if is_filled:
-                required_filled += 1
+                detected_colors = color_result
+                allowed_colors = []
+            
+            if isinstance(detected_colors, dict):
+                detected_colors = detected_colors.get("colors", [])
+            elif not isinstance(detected_colors, list):
+                detected_colors = []
 
-        required_missing = required_fields - required_filled
+            normalized_colors = []
+            for c in detected_colors:
+                cs = str(c).strip()
+                if cs and cs not in normalized_colors:
+                    normalized_colors.append(cs)
+            detected_colors = normalized_colors[:5]
+            
+            log(f"✅ Colors detected: {detected_colors}")
 
-        ai_target_fields = len(generate_fields_for_ai)
-        final_charcs = merged_charcs
-        log(f"✅ Characteristics validated (batched score: {chars_score})")
+            log("\n⚙️  STEP 3: Generating characteristics...")
+            
+            primary_field_names = {"Тип низа", "Тип верха", "Пол", "Сезон"}
+            
+            primary_fields = [
+                f for f in generate_fields_for_ai 
+                if f.get("name") in primary_field_names
+            ]
+            
+            secondary_fields = [
+                f for f in generate_fields_for_ai 
+                if f.get("name") not in primary_field_names
+            ]
+            
+            log(f"   📍 Primary fields (dependencies): {len(primary_fields)}")
+            log(f"   📍 Secondary fields: {len(secondary_fields)}")
 
-        log("\n📝 STEP 4: Description generation + validation...")
-        
-        wb_description_result = self.description_service.generate_description(
-            image_description=image_description,
-            max_iterations=3
-        )
-        
-        log(f"✅ Description: {len(wb_description_result['new_description'])} chars (score: {wb_description_result['score']})")
-        time.sleep(1)
-        
-        log("\n🏷️ STEP 5: Title generation + validation...")
-        
-        wb_title_result = self.description_service.generate_title(
-            subject_name=subject_name,
-            characteristics=final_charcs,
-            description=wb_description_result["new_description"],
-            max_iterations=3
-        )
-        
-        log(f"✅ Title: {wb_title_result['new_title']} (score: {wb_title_result['score']})")
+            if primary_fields:
+                log("   🔄 Generating PRIMARY fields...")
+                
+                primary_names = [f["name"] for f in primary_fields if f.get("name")]
+                primary_allowed = {
+                    name: allowed_values.get(name, []) 
+                    for name in primary_names
+                }
+                primary_limits = {
+                    name: filtered_limits.get(name, {}) 
+                    for name in primary_names
+                }
+                
+                primary_result = self._generate_and_validate_characteristics_batched(
+                    image_description=image_description,
+                    charcs_meta_raw=primary_fields,
+                    limits=primary_limits,
+                    allowed_values=primary_allowed,
+                    detected_colors=detected_colors,
+                    fixed_data=fixed_data,
+                    subject_name=subject_name,
+                    log_callback=log,
+                    all_field_names=generate_field_names,
+                    conditional_skip=conditional_skip,
+                    locked_fields=list(locked_field_names),
+                )
+                
+                primary_charcs = primary_result["characteristics"]
+                log(f"   ✅ PRIMARY fields generated: {len(primary_charcs)}")
+            else:
+                primary_charcs = []
+            
+            # Filter SECONDARY fields based on conditional logic
+            log("   🔍 Filtering SECONDARY fields based on conditions...")
+            
+            filtered_secondary = DataLoader.filter_conditional_fields_by_context(
+                secondary_fields,
+                primary_charcs
+            )
+            
+            removed_count = len(secondary_fields) - len(filtered_secondary)
+            if removed_count > 0:
+                removed_names = [
+                    f.get("name") 
+                    for f in secondary_fields 
+                    if f not in filtered_secondary
+                ]
+                log(f"   ℹ️  Removed {removed_count} conditional fields: {removed_names}")
+            
+            # Generate SECONDARY fields
+            if filtered_secondary:
+                log(f"   🔄 Generating SECONDARY fields ({len(filtered_secondary)})...")
+                
+                secondary_names = [f["name"] for f in filtered_secondary if f.get("name")]
+                secondary_allowed = {
+                    name: allowed_values.get(name, []) 
+                    for name in secondary_names
+                }
+                secondary_limits = {
+                    name: filtered_limits.get(name, {}) 
+                    for name in secondary_names
+                }
+                
+                secondary_result = self._generate_and_validate_characteristics_batched(
+                    image_description=image_description,
+                    charcs_meta_raw=filtered_secondary,
+                    limits=secondary_limits,
+                    allowed_values=secondary_allowed,
+                    detected_colors=detected_colors,
+                    fixed_data=fixed_data,
+                    subject_name=subject_name,
+                    log_callback=log,
+                    all_field_names=generate_field_names,
+                    conditional_skip=conditional_skip,
+                    locked_fields=list(locked_field_names),
+                )
+                
+                secondary_charcs = secondary_result["characteristics"]
+                log(f"   ✅ SECONDARY fields generated: {len(secondary_charcs)}")
+            else:
+                secondary_charcs = []
+                secondary_result = {
+                    "score": 100,
+                    "iterations": 0,
+                    "issues": []
+                }
+            
+            # Combine results
+            ai_charcs_all = primary_charcs + secondary_charcs
+            
+            # Average scores
+            if primary_fields and filtered_secondary:
+                chars_score = int(
+                    (primary_result["score"] + secondary_result["score"]) / 2
+                )
+                chars_iterations = primary_result["iterations"] + secondary_result["iterations"]
+                chars_issues = primary_result["issues"] + secondary_result["issues"]
+            elif primary_fields:
+                chars_score = primary_result["score"]
+                chars_iterations = primary_result["iterations"]
+                chars_issues = primary_result["issues"]
+            elif filtered_secondary:
+                chars_score = secondary_result["score"]
+                chars_iterations = secondary_result["iterations"]
+                chars_issues = secondary_result["issues"]
+            else:
+                chars_score = 0
+                chars_iterations = 0
+                chars_issues = []
 
-        return {
-            "nmID": card.get("nmID"),
-            "article": article,  
-            "subjectID": subject_id,
-            "subjectName": subject_name,
+            log(f"✅ Characteristics validated (score: {chars_score})")
 
-            "old_title": card.get("title"),
-            "old_description": card.get("description"),
-            "old_characteristics": card.get("characteristics") or [],
+            # ========================================
+            # Merge all characteristics
+            # ========================================
+            merged_charcs = self._build_full_characteristics(
+                charcs_meta_raw=charcs_meta_raw,
+                fixed_row=fixed_row,
+                ai_charcs=ai_charcs_all,
+                detected_colors=detected_colors,
+                fixed_fields=fixed_fields,
+                conditional_skip=conditional_skip,
+                conditional_fill=conditional_fill,
+            )
 
-            "photo_urls": photo_urls,
+            # ========================================
+            # Statistics
+            # ========================================
+            ai_filled = sum(1 for c in ai_charcs_all if c.get("value"))
+            fixed_filled = sum(
+                1
+                for c in merged_charcs
+                if c.get("name") in [f.get("name") for f in fixed_fields] and c.get("value")
+            )
+            total_filled = sum(1 for c in merged_charcs if c.get("value"))
 
-            "image_description": image_description,
+            total_fields = len(charcs_meta_raw)
+            required_fields = sum(1 for m in charcs_meta_raw if m.get("required"))
+            optional_fields = total_fields - required_fields
 
-            "new_title": wb_title_result["new_title"],
-            "new_description": wb_description_result["new_description"],
-            "new_characteristics": final_charcs,
-
-            "detected_colors": detected_colors,
-
-            "validation_score": chars_score,
-            "validation_issues": chars_issues,
-            "iterations_done": chars_iterations,
-
-            "title_history": wb_title_result.get("history", []),
-            "title_warnings": wb_title_result["warnings"],
-            "title_score": wb_title_result["score"],
-            "title_attempts": wb_title_result["attempts"],
-
-            "description_history": wb_description_result.get("history", []),
-            "description_warnings": wb_description_result["warnings"],
-            "description_score": wb_description_result["score"],
-            "description_attempts": wb_description_result["attempts"],
-
-            "fixed_row": fixed_row,
-
-            "stats": {
-                "fixed_fields": len(fixed_fields),
-                "conditional_skip": len(conditional_skip),
-                "conditional_fill": len(conditional_fill),
-                "generated_fields": len(generate_fields_for_ai),
-                "total_fields": total_fields,
-
-                "required_fields": required_fields,
-                "optional_fields": optional_fields,
-                "required_filled": required_filled,
-                "required_missing": required_missing,
-                "ai_target_fields": ai_target_fields,
-                "ai_filled": ai_filled,
-                "fixed_filled": fixed_filled,
-                "total_filled": total_filled,
+            name_to_required = {
+                m.get("name"): bool(m.get("required"))
+                for m in charcs_meta_raw
+                if m.get("name")
             }
-        }
+
+            required_filled = 0
+            for ch in merged_charcs:
+                name = ch.get("name")
+                if not name or not name_to_required.get(name):
+                    continue
+                val = ch.get("value")
+                if isinstance(val, list):
+                    is_filled = any(str(v).strip() for v in val)
+                else:
+                    is_filled = bool(str(val or "").strip())
+                if is_filled:
+                    required_filled += 1
+
+            required_missing = required_fields - required_filled
+            ai_target_fields = len(generate_fields_for_ai)
+            final_charcs = merged_charcs
+
+            # ========================================
+            # STEP 4: Description Generation
+            # ========================================
+            log("\n📝 STEP 4: Description generation + validation...")
+            
+            wb_description_result = self.description_service.generate_description(
+                image_description=image_description,
+                max_iterations=3
+            )
+            
+            log(f"✅ Description: {len(wb_description_result['new_description'])} chars (score: {wb_description_result['score']})")
+            time.sleep(1)
+            
+            # ========================================
+            # STEP 5: Title Generation
+            # ========================================
+            log("\n🏷️  STEP 5: Title generation + validation...")
+            
+            wb_title_result = self.description_service.generate_title(
+                subject_name=subject_name,
+                characteristics=final_charcs,
+                description=wb_description_result["new_description"],
+                max_iterations=3
+            )
+            
+            log(f"✅ Title: {wb_title_result['new_title']} (score: {wb_title_result['score']})")
+
+            # ========================================
+            # Final Response
+            # ========================================
+            return {
+                "status": "success",
+                "nmID": card.get("nmID"),
+                "article": article,
+                "subjectID": subject_id,
+                "subjectName": subject_name,
+
+                "old_title": card.get("title"),
+                "old_description": card.get("description"),
+                "old_characteristics": card.get("characteristics") or [],
+
+                "photo_urls": photo_urls,
+                "image_description": image_description,
+
+                "new_title": wb_title_result["new_title"],
+                "new_description": wb_description_result["new_description"],
+                "new_characteristics": final_charcs,
+
+                "detected_colors": detected_colors,
+
+                "validation_score": chars_score,
+                "validation_issues": chars_issues,
+                "iterations_done": chars_iterations,
+
+                "title_history": wb_title_result.get("history", []),
+                "title_warnings": wb_title_result["warnings"],
+                "title_score": wb_title_result["score"],
+                "title_attempts": wb_title_result["attempts"],
+
+                "description_history": wb_description_result.get("history", []),
+                "description_warnings": wb_description_result["warnings"],
+                "description_score": wb_description_result["score"],
+                "description_attempts": wb_description_result["attempts"],
+
+                "fixed_row": fixed_row,
+
+                "stats": {
+                    "fixed_fields": len(fixed_fields),
+                    "conditional_skip": len(conditional_skip),
+                    "conditional_fill": len(conditional_fill),
+                    "generated_fields": len(generate_fields_for_ai),
+                    "primary_fields_generated": len(primary_fields),
+                    "secondary_fields_generated": len(filtered_secondary),
+                    "conditional_fields_removed": removed_count if filtered_secondary else 0,
+                    "total_fields": total_fields,
+                    "required_fields": required_fields,
+                    "optional_fields": optional_fields,
+                    "required_filled": required_filled,
+                    "required_missing": required_missing,
+                    "ai_target_fields": ai_target_fields,
+                    "ai_filled": ai_filled,
+                    "fixed_filled": fixed_filled,
+                    "total_filled": total_filled,
+                }
+            }
+        
+        except ValueError as e:
+            # Card not found
+            log(f"❌ Card not found: {e}")
+            return {
+                "status": "error",
+                "error_type": "card_not_found",
+                "article": article,
+                "message": f"Card with article {article} not found in WB API"
+            }
+        
+        except Exception as e:
+            # Unexpected error
+            log(f"❌ Unexpected error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            return {
+                "status": "error",
+                "error_type": "unexpected",
+                "article": article,
+                "message": str(e),
+                "traceback": traceback.format_exc()
+            }
 
     def _extract_gender_from_card(self, card: Dict[str, Any]) -> Optional[str]:
         characteristics = card.get("characteristics", [])
@@ -410,7 +563,6 @@ class PipelineService:
 
         locked_fields = locked_fields or []
 
-        # conditional_skip nomlari
         skip_names = set()
         if conditional_skip:
             skip_names = {f.get("name") for f in conditional_skip if f.get("name")}
@@ -438,7 +590,9 @@ class PipelineService:
             batch_meta = charcs_meta_raw[start:end]
             batch_names = [m.get("name") for m in batch_meta if m.get("name")]
 
-            log(f"  ▶️ Batch {start // batch_size + 1}: fields {start+1}-{end} ({len(batch_meta)} items)")
+            log(
+                f"  ▶️ Batch {start // batch_size + 1}: fields {start+1}-{end} ({len(batch_meta)} items)"
+            )
 
             batch_limits: Dict[str, Dict[str, int]] = {
                 name: limits.get(name, {}) for name in batch_names
@@ -447,7 +601,32 @@ class PipelineService:
                 name: allowed_values.get(name, []) for name in batch_names
             }
 
-            def process_batch(batch_meta_local: list, batch_names_local: List[str]) -> Dict[str, Any]:
+            strict_instructions = {}
+            for name in batch_names:
+                vals = batch_allowed.get(name, [])
+                lims = batch_limits.get(name, {})
+                max_count = (
+                    lims.get("max") or lims.get("maxCount") or lims.get("max_count") or 99
+                )
+
+                if vals:
+                    strict_instructions[name] = {
+                        "allowed_count": len(vals),
+                        "max_count": max_count,
+                        "sample_values": vals[:10],  # Birinchi 10 ta misol
+                        "rule": f"FAQAT {len(vals)} ta qiymatdan tanlash. Max {max_count} ta.",
+                    }
+                else:
+                    strict_instructions[name] = {
+                        "type": "free_text",
+                        "max_count": max_count,
+                        "rule": f"Free text. Max {max_count} ta element.",
+                    }
+
+            def process_batch(
+                batch_meta_local: list, batch_names_local: List[str]
+            ) -> Dict[str, Any]:
+                # GENERATSIYA
                 ai_charcs_batch = self.characteristics_generator.generate_characteristics(
                     image_description=image_description,
                     charcs_meta_raw=batch_meta_local,
@@ -457,17 +636,16 @@ class PipelineService:
                     fixed_data=fixed_data,
                     subject_name=subject_name,
                     log_callback=log,
-                    all_field_names=all_field_names,
+                    all_field_names=all_field_names,  # CONTEXT
                 )
 
+                # VALIDATSIYA
                 validation = self.characteristics_validator.validate_characteristics(
                     characteristics=ai_charcs_batch,
                     charcs_meta_raw=batch_meta_local,
                     limits=batch_limits,
                     allowed_values=batch_allowed,
                     locked_fields=locked_fields,
-                    detected_colors=detected_colors,
-                    fixed_data=fixed_data,
                     log_callback=log,
                 )
                 return validation
@@ -478,6 +656,7 @@ class PipelineService:
             batch_issues = validation_result["issues"]
             batch_iterations = validation_result["iterations"]
 
+            # Check missing fields
             got_nonempty_names = set()
             for c in batch_charcs:
                 nm = c.get("name")
@@ -488,31 +667,31 @@ class PipelineService:
                 got_nonempty_names.add(nm)
 
             expected_names = {n for n in batch_names if n}
-
             missing = expected_names - got_nonempty_names
 
             if missing:
                 log(f"  ⚠️ Missing fields in batch: {missing}")
-                
-                # conditional_skip maydonlarini missing ichidan chiqarib tashlaymiz
+
                 should_retry = missing - skip_names
                 should_ignore = missing & skip_names
-                
+
                 if should_ignore:
                     log(f"  ℹ️ Ignoring conditional_skip fields: {should_ignore}")
-                
+
                 if not should_retry:
                     log(f"  ✅ All missing fields are conditional_skip, continuing...")
                 else:
                     log(f"  🔄 Retrying only for: {should_retry}")
-                    
+
                     retry_meta = [m for m in batch_meta if m.get("name") in should_retry]
 
                     if retry_meta:
                         retry_validation = process_batch(retry_meta, list(should_retry))
                         retry_charcs = retry_validation["characteristics"]
 
-                        got_names_after = {c.get("name") for c in batch_charcs if c.get("name")}
+                        got_names_after = {
+                            c.get("name") for c in batch_charcs if c.get("name")
+                        }
                         for ch in retry_charcs:
                             nm = ch.get("name")
                             if nm and nm not in got_names_after:
@@ -531,7 +710,8 @@ class PipelineService:
             log(f"  ✅ Batch done: score={batch_score}, fields={len(batch_charcs)}")
 
         overall_score = int(sum(batch_scores) / len(batch_scores)) if batch_scores else 0
-        
+
+        # Fixed data fallback
         if fixed_data:
             for ch in all_charcs:
                 name = ch.get("name")

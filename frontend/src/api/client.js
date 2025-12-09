@@ -1,65 +1,46 @@
-// ============================================
-// FILE 4: src/api/client.js
-// COMPLETE VERSION - Replace entire file
-// ============================================
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-async function request(path, options = {}) {
-  const {
-    method = "GET",
-    token,
-    params,
-    body,
-    stream = false,
-  } = options;
+export async function request(
+  path,
+  { method = "GET", token, body, params } = {}
+) {
+  // URL ni query bilan yig‘amiz
+  const urlObj = new URL(`${API_URL}${path}`);
 
-  let url = API_URL + path;
-
-  if (params) {
-    const qs = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== "") qs.append(k, String(v));
+  if (params && typeof params === "object") {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        urlObj.searchParams.append(key, String(value));
+      }
     });
-    const qsStr = qs.toString();
-    if (qsStr) url += "?" + qsStr;
   }
 
   const headers = {};
-  if (!stream) {
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const options = { method, headers };
+
+  if (body instanceof FormData) {
+    options.body = body;
+  } else if (body) {
     headers["Content-Type"] = "application/json";
-  }
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+    options.body = JSON.stringify(body);
   }
 
-  const fetchOptions = {
-    method,
-    headers,
-  };
-
-  if (body && method !== "GET" && method !== "HEAD") {
-    fetchOptions.body = JSON.stringify(body);
-  }
-
-  const res = await fetch(url, fetchOptions);
-
-  if (stream) {
-    return res;
-  }
-
-  let data = null;
+  const res = await fetch(urlObj.toString(), options);
+  const text = await res.text();
+  let data;
   try {
-    data = await res.json();
-  } catch (_) {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
   }
 
-  if (!res.ok) {
-    const msg =
-      data?.detail || data?.message || `HTTP ${res.status} ${res.statusText}`;
-    throw new Error(msg);
-  }
-
+  if (!res.ok)
+    throw new Error(
+      data?.detail || data?.errorText || `HTTP ${res.status}`
+    );
   return data;
 }
 
@@ -84,11 +65,13 @@ export const api = {
     }),
 
   process: ({ article }, token) =>
-    request("/api/process", {
+    fetch(`${API_URL}/api/process`, {
       method: "POST",
-      token,
-      body: { article },
-      stream: true,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ article }),
     }),
 
   history: {
