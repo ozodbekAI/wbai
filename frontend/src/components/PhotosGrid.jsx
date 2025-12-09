@@ -1,5 +1,5 @@
 // src/components/PhotosGrid.jsx
-import { Image, Plus, Save, ExternalLink } from "lucide-react";
+import { Image, Plus, Save, ExternalLink, Upload, Trash2 } from "lucide-react";
 
 export default function PhotosGrid({
   photos = [],          // [{ photoId, url, isNew, file? }]
@@ -7,6 +7,8 @@ export default function PhotosGrid({
   onGenerate,
   onReorder,
   onSaveOrder,
+  onUploadClick,        // YANGI
+  onDeletePhoto,        // YANGI (idx, photo)
 }) {
   if (!photos.length && !videoUrl) return null;
 
@@ -42,16 +44,29 @@ export default function PhotosGrid({
           </span>
         </h3>
 
-        {onGenerate && (
-          <button
-            type="button"
-            onClick={onGenerate}
-            className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-white font-medium flex items-center gap-1"
-          >
-            <Plus className="w-3 h-3" />
-            Сгенерировать новые фото
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {onUploadClick && (
+            <button
+              type="button"
+              onClick={onUploadClick}
+              className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-white font-medium flex items-center gap-1"
+            >
+              <Upload className="w-3 h-3" />
+              Загрузить с компьютера
+            </button>
+          )}
+
+          {onGenerate && (
+            <button
+              type="button"
+              onClick={onGenerate}
+              className="text-xs px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 border border-white/30 text-white font-medium flex items-center gap-1"
+            >
+              <Plus className="w-3 h-3" />
+              Сгенерировать новые фото
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="p-6 space-y-4">
@@ -84,7 +99,7 @@ export default function PhotosGrid({
           {photos.map((p, idx) => (
             <button
               key={(p.photoId ?? p.url) + idx}
-              className="aspect-square cursor-move"
+              className="aspect-square cursor-move relative group"
               onClick={() => window.open(p.url, "_blank")}
               draggable
               onDragStart={(e) => handleDragStart(e, idx)}
@@ -96,6 +111,25 @@ export default function PhotosGrid({
                 alt={`Фото ${idx + 1}`}
                 className="w-full h-full object-cover rounded-xl border-2 border-gray-200 hover:border-purple-400 transition-all hover:scale-[1.02]"
               />
+
+              {onDeletePhoto && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeletePhoto(idx, p);
+                  }}
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition bg-black/60 hover:bg-black text-white rounded-full p-1"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              )}
+
+              {p.isNew && (
+                <span className="absolute left-2 bottom-2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white">
+                  Новое
+                </span>
+              )}
             </button>
           ))}
         </div>

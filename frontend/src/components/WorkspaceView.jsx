@@ -133,10 +133,14 @@ export default function WorkspaceView({ token, username, onLogout }) {
     }
   };
 
+  
+
   const handleClearError = () => setError("");
   const handleCancelCurrent = () => {
     setProcessingCurrent(false);
   };
+
+  
 
   async function savePhotoOrderToWB(updatedPhotos) {
     try {
