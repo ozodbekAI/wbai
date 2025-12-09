@@ -75,13 +75,12 @@ class ProcessController:
                 try:
                     user_id = getattr(user, "id", None)
                     if user_id is None and isinstance(user, dict):
-                        user_id = user.get("id")
+                        user_id = user.get("id") or user.get("user_id")   # <-- shu qo‘shildi
 
                     if user_id is not None:
                         repo = HistoryRepository(db)
 
                         if result is not None:
-                            # PipelineService.process_article natijalari asosida
                             repo.create_history(
                                 user_id=user_id,
                                 article=article,
@@ -106,7 +105,6 @@ class ProcessController:
                                 error_message=error_message,
                             )
                         else:
-                            # pipeline yiqilib ketgan bo'lsa ham minimal zapis
                             repo.create_history(
                                 user_id=user_id,
                                 article=article,
@@ -118,7 +116,6 @@ class ProcessController:
                                 processing_time=processing_time,
                             )
                 except Exception as history_err:
-                    # history yozishda xato bo'lsa – faqat log jo'natamiz
                     await queue.put(
                         json.dumps(
                             {

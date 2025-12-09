@@ -1,5 +1,4 @@
 from typing import List, Dict, Any, Optional
-import time
 
 from services.base.openai_service import BaseOpenAIService
 from core.database import get_db
@@ -7,6 +6,7 @@ from services.promnt_loader import PromptLoaderService
 
 
 class CharacteristicsValidatorService(BaseOpenAIService):
+
     def validate_characteristics(
         self,
         characteristics: List[Dict[str, Any]],
@@ -14,32 +14,43 @@ class CharacteristicsValidatorService(BaseOpenAIService):
         limits: Dict[str, Dict[str, int]],
         allowed_values: Dict[str, List[str]],
         locked_fields: List[str],
-        detected_colors: List[str],
-        fixed_data: Dict[str, List[str]],
-        max_iterations: int = 3,
         log_callback=None,
+        max_attempts: int = 3,
     ) -> Dict[str, Any]:
+
         def log(msg: str):
             if log_callback:
                 log_callback(msg)
 
-        best_charcs = characteristics
-        best_score = 0
-        best_iteration = 1
-        best_issues: List[str] = []
+        # Pre-validation: Backend tomonidan qattiq tekshirish
+        violations = self._check_strict_violations(
+            characteristics, allowed_values, limits
+        )
 
-        current_charcs = characteristics
-        consecutive_failures = 0
+        if violations:
+            log("⚠️ PRE-VALIDATION: Qoidalar buzilgan:")
+            for v in violations[:5]:
+                log(f"   {v}")
 
-        locked_fields = locked_fields or []
+        # Normalize qilingan characteristics
+        current_charcs = self._normalize_values(
+            characteristics,
+            allowed_values=allowed_values,
+            limits=limits,
+        )
 
-        for iteration in range(1, max_iterations + 1):
-            log(f"📋 Characteristics validation attempt {iteration}/{max_iterations}")
+        best_result: Dict[str, Any] = {
+            "characteristics": current_charcs,
+            "score": 0,
+            "issues": [],
+            "iterations": 0,
+        }
 
-            time.sleep(1)
-
+        for attempt in range(1, max_attempts + 1):
             try:
-                validation = self._validate_single(
+                log(f"🔋 Characteristics validation attempt {attempt}/{max_attempts}")
+
+                result = self._validate_single(
                     characteristics=current_charcs,
                     charcs_meta_raw=charcs_meta_raw,
                     limits=limits,
@@ -47,73 +58,111 @@ class CharacteristicsValidatorService(BaseOpenAIService):
                     locked_fields=locked_fields,
                 )
 
-                score = validation["score"]
-                issues = validation["issues"]
+                score = int(result.get("score") or 0)
+                issues = result.get("issues") or []
+
+                model_charcs = result.get("characteristics") or current_charcs
+                model_charcs = self._normalize_values(
+                    model_charcs,
+                    allowed_values=allowed_values,
+                    limits=limits,
+                )
+
+                # Backend tomonidan qo'shimcha tekshirish
+                post_violations = self._check_strict_violations(
+                    model_charcs, allowed_values, limits
+                )
+
+                if post_violations:
+                    # Score pasayishi
+                    penalty = min(len(post_violations) * 5, 30)
+                    score = max(0, score - penalty)
+                    issues.extend([f"BACKEND: {v}" for v in post_violations[:3]])
+                    log(f"  ⚠️ Backend violations found: -{penalty} score")
 
                 log(f"  Score: {score}, Issues: {len(issues)}")
 
-                if score > best_score:
-                    best_score = score
-                    best_charcs = current_charcs
-                    best_iteration = iteration
-                    best_issues = issues
-                    consecutive_failures = 0
-                else:
-                    consecutive_failures += 1
-
-                if score >= 85:
-                    log(
-                        f"✅ Characteristics validation passed (score: {score}) "
-                        f"{current_charcs}"
-                    )
-                    return {
-                        "characteristics": current_charcs,
+                if score >= best_result["score"]:
+                    best_result = {
+                        "characteristics": model_charcs,
                         "score": score,
-                        "iterations": iteration,
-                        "issues": [],
+                        "issues": issues,
+                        "iterations": attempt,
                     }
 
-                if consecutive_failures >= 2:
-                    log("⚠️ Consecutive failures, using best result")
+                if score >= 95:
                     break
 
-                if iteration < max_iterations and issues:
-                    log("  Refining characteristics...")
-                    time.sleep(1)
-
-                    try:
-                        current_charcs = self._refine_characteristics(
-                            characteristics=current_charcs,
-                            issues=issues,
-                            charcs_meta_raw=charcs_meta_raw,
-                            limits=limits,
-                            allowed_values=allowed_values,
-                            locked_fields=locked_fields,
-                            detected_colors=detected_colors,
-                            fixed_data=fixed_data,
-                        )
-                    except Exception as e:
-                        log(f"  ❌ Refine error: {e}")
-                        consecutive_failures += 1
-                        if consecutive_failures >= 2:
-                            break
+                current_charcs = model_charcs
 
             except Exception as e:
-                log(f"  ❌ Validation error: {e}")
-                consecutive_failures += 1
-                if consecutive_failures >= 2:
-                    break
+                log(f"❌ Validation error on iteration {attempt}: {e}")
 
-        log(
-            f"📌 Using best result from iteration {best_iteration} "
-            f"(score: {best_score})"
-        )
-        return {
-            "characteristics": best_charcs,
-            "score": best_score,
-            "iterations": max_iterations,
-            "issues": best_issues,
-        }
+        return best_result
+
+    def _check_strict_violations(
+        self,
+        characteristics: List[Dict[str, Any]],
+        allowed_values: Dict[str, List[str]],
+        limits: Dict[str, Dict[str, int]],
+    ) -> List[str]:
+        """
+        Backend tomonidan QATTIQ TEKSHIRISH
+        """
+        violations = []
+
+        for char in characteristics:
+            name = char.get("name")
+            if not name:
+                continue
+
+            value = char.get("value", [])
+
+            # Listga normalizatsiya
+            if isinstance(value, str):
+                values_list = [value.strip()] if value.strip() else []
+            elif isinstance(value, list):
+                values_list = [str(v).strip() for v in value if str(v).strip()]
+            else:
+                values_list = []
+
+            # 1. allowed_values tekshiruvi
+            dict_vals = allowed_values.get(name) or []
+            if dict_vals:
+                normalized_dict = set(str(v).strip().lower() for v in dict_vals)
+
+                for val in values_list:
+                    val_lower = val.lower()
+
+                    # Aniq match yoki substring match
+                    found = False
+                    if val_lower in normalized_dict:
+                        found = True
+                    else:
+                        for dv in dict_vals:
+                            if dv.lower() in val_lower or val_lower in dv.lower():
+                                found = True
+                                break
+
+                    if not found:
+                        violations.append(
+                            f"{name}: '{val}' yo'q allowed_values ichida"
+                        )
+
+            # 2. Limit tekshiruvi
+            field_limits = limits.get(name) or {}
+            max_limit = (
+                field_limits.get("max")
+                or field_limits.get("maxCount")
+                or field_limits.get("max_count")
+            )
+            if isinstance(max_limit, int) and max_limit > 0:
+                if len(values_list) > max_limit:
+                    violations.append(
+                        f"{name}: {len(values_list)} > max={max_limit}"
+                    )
+
+        return violations
 
     def _validate_single(
         self,
@@ -123,94 +172,62 @@ class CharacteristicsValidatorService(BaseOpenAIService):
         allowed_values: Dict[str, List[str]],
         locked_fields: List[str],
     ) -> Dict[str, Any]:
-        try:
-            system_prompt = self._load_validation_prompt()
-            charcs_meta = self._build_charcs_meta(charcs_meta_raw)
+        """AI validatsiya"""
 
-            result = self._call_openai(
-                system_prompt=system_prompt,
-                user_payload={
-                    "characteristics": characteristics,
-                    "charcs_meta": charcs_meta,
-                    "limits": limits,
-                    "allowed_values": allowed_values,
-                    "locked_fields": locked_fields,
-                },
-                photo_urls=None,
-                max_tokens=4096,
-            )
+        system_prompt = self._load_prompt()
 
-            return {
-                "score": result.get("score", 0),
-                "issues": result.get("issues", []),
-            }
-        except Exception as e:
-            return {
-                "score": 0,
-                "issues": [f"Validation error: {str(e)}"],
-            }
-
-    def _refine_characteristics(
-        self,
-        characteristics: List[Dict[str, Any]],
-        issues: List[str],
-        charcs_meta_raw: List[Dict[str, Any]],
-        limits: Dict[str, Dict[str, int]],
-        allowed_values: Dict[str, List[str]],
-        locked_fields: List[str],
-        detected_colors: List[str],
-        fixed_data: Dict[str, List[str]],
-    ) -> List[Dict[str, Any]]:
-        try:
-            system_prompt = self._load_refine_prompt()
-            charcs_meta = self._build_charcs_meta(charcs_meta_raw)
-
-            result = self._call_openai(
-                system_prompt=system_prompt,
-                user_payload={
-                    "characteristics": characteristics,
-                    "issues": issues,
-                    "charcs_meta": charcs_meta,
-                    "limits": limits,
-                    "allowed_values": allowed_values,
-                    "locked_fields": locked_fields,
-                    "detected_colors": detected_colors,
-                    "fixed_data": fixed_data,
-                },
-                photo_urls=None,
-                max_tokens=8192,
-            )
-
-            refined = result.get("characteristics", characteristics)
-            return self._normalize_characteristics(
-                refined,
-                allowed_values=allowed_values,
-                limits=limits
-            )
-
-        except Exception:
-            return characteristics
-
-    def _build_charcs_meta(
-        self,
-        charcs_meta_raw: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        return [
+        charcs_meta = [
             {
                 "id": c.get("charcID"),
                 "name": c.get("name"),
-                "required": c.get("required", False),
+                "required": bool(c.get("required", False)),
             }
             for c in charcs_meta_raw
+            if c.get("name")
         ]
 
-    def _normalize_characteristics(
+        payload = {
+            "characteristics": characteristics,
+            "charcs_meta": charcs_meta,
+            "limits": limits,
+            "allowed_values": allowed_values,
+            "locked_fields": locked_fields,
+        }
+
+        result = self._call_openai(
+            system_prompt=system_prompt,
+            user_payload=payload,
+            photo_urls=None,
+            max_tokens=8000,
+        )
+
+        if not isinstance(result, dict):
+            raise ValueError("Validator response is not a JSON object")
+
+        if "score" not in result:
+            result["score"] = 0
+
+        if "issues" not in result or not isinstance(result.get("issues"), list):
+            result["issues"] = []
+
+        if "characteristics" in result and not isinstance(
+            result["characteristics"], list
+        ):
+            result["characteristics"] = characteristics
+
+        return result
+
+    def _normalize_values(
         self,
         characteristics: List[Dict[str, Any]],
         allowed_values: Dict[str, List[str]] | None = None,
+        limits: Dict[str, Dict[str, int]] | None = None,
     ) -> List[Dict[str, Any]]:
-
+        """
+        Xuddi generatordagi kabi normalizatsiya
+        """
         allowed_values = allowed_values or {}
+        limits = limits or {}
 
         for char in characteristics:
             name = char.get("name")
@@ -220,20 +237,14 @@ class CharacteristicsValidatorService(BaseOpenAIService):
 
             value = char["value"]
 
-            # 1) Avval listga normalizatsiya
+            # 1) Listga normalizatsiya
             if isinstance(value, str):
                 if "," in value:
-                    values_list = [
-                        v.strip() for v in value.split(",") if v.strip()
-                    ]
+                    values_list = [v.strip() for v in value.split(",") if v.strip()]
                 else:
                     values_list = [value.strip()] if value.strip() else []
             elif isinstance(value, list):
-                values_list = [
-                    str(v).strip()
-                    for v in value
-                    if str(v).strip()
-                ]
+                values_list = [str(v).strip() for v in value if str(v).strip()]
             elif value is not None:
                 v = str(value).strip()
                 values_list = [v] if v else []
@@ -242,10 +253,22 @@ class CharacteristicsValidatorService(BaseOpenAIService):
 
             dict_vals = allowed_values.get(name) or []
             if not dict_vals:
-                # dictionary yo'q – erkin matn
+                field_limits = limits.get(name) or {}
+                max_limit = (
+                    field_limits.get("max")
+                    or field_limits.get("maxCount")
+                    or field_limits.get("max_count")
+                )
+                if (
+                    isinstance(max_limit, int)
+                    and max_limit > 0
+                    and len(values_list) > max_limit
+                ):
+                    values_list = values_list[:max_limit]
                 char["value"] = values_list
                 continue
 
+            # Dictionary bor - mapping
             normalized_dict = [str(v).strip() for v in dict_vals if str(v).strip()]
             dict_lower_map = {v.lower(): v for v in normalized_dict}
 
@@ -294,93 +317,89 @@ class CharacteristicsValidatorService(BaseOpenAIService):
                 if matched:
                     continue
 
-                # dictionarydan tashqaridagi qiymat – tashlab yuboramiz
+            # Limit
+            field_limits = limits.get(name) or {}
+            max_limit = (
+                field_limits.get("max")
+                or field_limits.get("maxCount")
+                or field_limits.get("max_count")
+            )
+            if isinstance(max_limit, int) and max_limit > 0 and len(mapped) > max_limit:
+                mapped = mapped[:max_limit]
 
             char["value"] = mapped
 
         return characteristics
 
-    def _load_validation_prompt(self) -> str:
+    def _load_prompt(self) -> str:
+        """Promptni DB dan yuklash yoki fallback"""
         try:
             with get_db() as db:
                 loader = PromptLoaderService(db)
-                return loader.get_full_prompt("characteristics_validator")
+                return loader.get_full_prompt("characteristics_validator_text")
         except Exception:
-            return self._get_fallback_validation_prompt()
+            return self.get_fallback_prompt()
 
-    def _load_refine_prompt(self) -> str:
-        try:
-            with get_db() as db:
-                loader = PromptLoaderService(db)
-                return loader.get_full_prompt("characteristics_refiner")
-        except Exception:
-            return self._get_fallback_refine_prompt()
-
-    def _get_fallback_validation_prompt(self) -> str:
+    def get_fallback_prompt(self) -> str:
+        """YANGILANGAN: QATTIQ VALIDATOR PROMPT"""
         return """
-Ты — валидатор характеристик для Wildberries.
+Ты — валидатор характеристик Wildberries.
 
-ЗАДАЧА: Проверить корректность характеристик.
+🎯 ЗАДАЧА:
+1) Проанализировать уже сгенерированные характеристики товара
+2) Проверить их СОГЛАСОВАННОСТЬ, ЛОГИЧНОСТЬ и ПОЛНОТУ
+3) **КРИТИЧНО**: Проверить СООТВЕТСТВИЕ allowed_values и limits
 
-ПРОВЕРКИ:
-1. ОБЯЗАТЕЛЬНЫЕ (required): заполнены?
-2. ALLOWED VALUES:
-   - Для полей с allowed_values[name] КАЖДОЕ значение ДОЛЖНО быть ровно одним из allowed_values[name].
-   - Если значение содержит запятые, скобки или дополнительный текст — это ошибка.
-3. LIMITS:
-   - min/max количество значений соблюдены?
-4. LOCKED FIELDS: не изменены?
+🚨 КРИТИЧЕСКИЕ ПРОВЕРКИ:
 
-SCORING:
-- 100: Идеально
-- 85-100: Очень хорошо
-- 70-85: Хорошо
-- 50-70: Приемлемо
-- <50: Плохо
+1. ALLOWED_VALUES (СТРОГАЯ ПРОВЕРКА):
+   - Для КАЖДОГО поля, где allowed_values НЕ пустой:
+     * КАЖДОЕ значение в value ДОЛЖНО быть из allowed_values
+     * Если найдено значение НЕ из словаря → СЕРЬЕЗНАЯ ОШИБКА (-20 score)
+   
+   Пример:
+   - allowed_values["Покрой"] = ["прямой", "приталенный", "свободный"]
+   - value = ["облегающий"] → ❌ ОШИБКА! "облегающий" нет в словаре
 
-ФОРМАТ ОТВЕТА (JSON):
+2. LIMITS (СТРОГАЯ ПРОВЕРКА):
+   - limits[name].max НЕЛЬЗЯ превышать
+   - Если value имеет БОЛЬШЕ элементов чем max → ОШИБКА (-15 score)
+   
+   Пример:
+   - limits["Назначение"].max = 3
+   - value = ["офисный", "повседневный", "вечерний", "спортивный"] → ❌ 4 > 3
+
+3. REQUIRED FIELDS:
+   - Если required: true И value пустой → КРИТИЧЕСКАЯ ОШИБКА (-25 score)
+
+4. LOCKED_FIELDS:
+   - НЕ ДОЛЖНЫ изменяться
+
+SCORING (0-100):
+- 95-100: ИДЕАЛЬНО (все правила соблюдены)
+- 85-94: ХОРОШО (минимальные проблемы)
+- 70-84: СРЕДНЕ (несколько ошибок в allowed_values или limits)
+- 50-69: ПЛОХО (много ошибок)
+- 0-49: КРИТИЧНО (грубые нарушения allowed_values или limits)
+
+ФОРМАТ ОТВЕТА (СТРОГО JSON):
 {
   "score": 85,
   "issues": [
-    "Поле 'Назначение' содержит строку с несколькими значениями и скобками, нужно разбить на отдельные значения из allowed_values",
-    "Значение Y не из словаря"
-  ]
+    "Покрой: значение 'облегающий' не найдено в allowed_values",
+    "Назначение: 4 значения > max=3",
+    "Декоративные элементы: required поле пустое"
+  ],
+  "characteristics": [...]  // ОПЦИОНАЛЬНО: можешь слегка исправить
 }
 
-НЕ ДОБАВЛЯЙТЕ КОММЕНТАРИЕВ!
-ТОЛЬКО JSON!
+⚠️ ВАЖНО:
+- Если исправляешь characteristics:
+  * НЕ ДОБАВЛЯЙ значения вне allowed_values
+  * НЕ ПРЕВЫШАЙ limits.max
+  * НЕ ТРОГАЙ locked_fields
+- Если не уверен → лучше НЕ исправляй, просто опиши в issues
+
+НИКАКОГО ТЕКСТА ВНЕ JSON!
+ТОЛЬКО ЧИСТЫЙ JSON!
 """.strip()
-
-    def _get_fallback_refine_prompt(self) -> str:
-        return """
-Ты — корректор характеристик для Wildberries.
-
-ЗАДАЧА: Исправить найденные проблемы.
-
-ПРАВИЛА:
-1. locked_fields НЕ МЕНЯТЬ!
-2. Для полей с allowed_values[name]:
-   - Используй ТОЛЬКО значения из allowed_values[name].
-   - Если нужно несколько значений, каждая строка = одно значение из словаря.
-   - Никаких запятых и скобок внутри одного элемента.
-3. Соблюдай limits (min/max количество значений).
-4. Обязательные поля (required) заполняй ВСЕГДА.
-
-ФОРМАТ ОТВЕТА (JSON):
-{
-  "characteristics": [
-    {
-      "id": 30000,
-      "name": "Назначение",
-      "value": ["повседневный", "городской", "вечерний"]
-    }
-  ]
-}
-
-НЕ ДОБАВЛЯЙТЕ КОММЕНТАРИЕВ!
-ТОЛЬКО JSON!
-""".strip()
-
-
-    def get_fallback_prompt(self) -> str:
-        return self._get_fallback_validation_prompt()

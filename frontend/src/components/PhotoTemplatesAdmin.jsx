@@ -1,11 +1,9 @@
-// src/components/PhotoTemplatesAdmin.jsx
-
 import React, { useEffect, useState } from "react";
 import { Plus, Save, Trash2, Loader2, Image as ImageIcon } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-// Oddiy helper
+
 const buildUrl = (path) => `${API_BASE}${path}`;
 
 async function request(path, method = "GET", token, body) {
@@ -22,7 +20,6 @@ async function request(path, method = "GET", token, body) {
   try {
     data = await res.json();
   } catch {
-    // json bo'lmasligi ham mumkin
   }
 
   if (!res.ok) {
@@ -39,9 +36,8 @@ async function request(path, method = "GET", token, body) {
 }
 
 export default function PhotoTemplatesAdmin({ token }) {
-  const [activeMode, setActiveMode] = useState("scenes"); // "scenes" | "poses"
+  const [activeMode, setActiveMode] = useState("scenes"); 
 
-  // ===== SCENES =====
   const [sceneLoading, setSceneLoading] = useState(false);
   const [sceneCategories, setSceneCategories] = useState([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
@@ -60,7 +56,6 @@ export default function PhotoTemplatesAdmin({ token }) {
     prompt: "",
   });
 
-  // ===== POSES =====
   const [poseLoading, setPoseLoading] = useState(false);
   const [poseGroups, setPoseGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState(null);
@@ -79,7 +74,6 @@ export default function PhotoTemplatesAdmin({ token }) {
     prompt: "",
   });
 
-  // ===== LOAD SCENES =====
   useEffect(() => {
     if (!token) return;
     if (activeMode !== "scenes") return;

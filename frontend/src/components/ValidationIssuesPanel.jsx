@@ -93,7 +93,7 @@ export default function ValidationIssuesPanel({ validation }) {
 
             return (
               <div
-                key={issue.id || issue.code || idx}
+                key={`${issue.id || issue.code || "issue"}-${idx}`}
                 className="rounded-xl border border-orange-100 bg-orange-50/60 px-3 py-2.5 text-xs text-gray-800"
               >
                 <div className="flex items-start gap-2">

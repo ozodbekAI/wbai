@@ -49,7 +49,6 @@ class ColorService(BaseOpenAIService):
             color_items = []
             for i in colors_parent:
                 color_items.append(dataloader.load_by_parent(i))
-            # print("COLOR ITEMS:", color_items)
 
             if not color_items:
                 return [colors_parent]
@@ -65,10 +64,6 @@ class ColorService(BaseOpenAIService):
                 max_tokens=8196,
             )
 
-            # print("RESULT ----------------------- NAMES:", result_names)
-
-
-            # print("NAMES COLORS:", result_names)
 
             if log_callback:
                 log_callback(f"✅ Colors detected: {', '.join(result_names) or colors_parent}")

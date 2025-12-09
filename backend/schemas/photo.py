@@ -36,7 +36,7 @@ class SceneCategoryOut(BaseModel):
     is_active: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class SceneSubcategoryOut(BaseModel):
@@ -47,7 +47,7 @@ class SceneSubcategoryOut(BaseModel):
     is_active: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class SceneItemOut(BaseModel):
@@ -59,7 +59,7 @@ class SceneItemOut(BaseModel):
     is_active: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class PoseGroupOut(BaseModel):
@@ -69,7 +69,7 @@ class PoseGroupOut(BaseModel):
     is_active: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class PoseSubgroupOut(BaseModel):
@@ -80,7 +80,7 @@ class PoseSubgroupOut(BaseModel):
     is_active: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class PosePromptOut(BaseModel):
@@ -92,7 +92,7 @@ class PosePromptOut(BaseModel):
     is_active: bool
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # ==== ADMIN CREATE / UPDATE СХЕМАЛАРИ ====

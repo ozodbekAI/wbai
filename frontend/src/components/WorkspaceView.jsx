@@ -27,6 +27,10 @@ import ValidationIssuesPanel from "./ValidationIssuesPanel";
 import PhotoAiEditor from "./PhotoAiEditor";
 import PhotoTemplatesPanel from "./PhotoTemplatesPanel";
 import PhotosGrid from "./PhotosGrid";
+import { syncWbMedia } from "../api/wbMediaApi";
+import { updateWbCards } from "../api/wbCardsApi"; 
+
+import { message } from "antd"; 
 
 import { api } from "../api/client";
 
@@ -37,6 +41,9 @@ export default function WorkspaceView({ token, username, onLogout }) {
 
   const [processingCurrent, setProcessingCurrent] = useState(false);
   const [processing, setProcessing] = useState(false);
+
+  const [cardVideo, setCardVideo] = useState(null);
+
 
   const [card, setCard] = useState(null);
   const [result, setResult] = useState(null);
@@ -102,10 +109,19 @@ export default function WorkspaceView({ token, username, onLogout }) {
       setCard(data.card);
       setCurrentValidation(data.response || null);
 
-      // Photos dan URLlarni to'g'ri olish
+      setCard(data.card);
+      setCurrentValidation(data.response || null);
+
+      setCardVideo(data.card.video || null);
+
       const photosFromCard = (data.card?.photos || [])
-        .map((p) => p.big || p.hq || p.square || p.c246x328 || p.c516x688 || p)
-        .filter(Boolean);
+        .map((p) => ({
+          photoId: p.photoId, // hozircha kerak emas, lekin qoldirsa bo'ladi
+          url: p.big || p.hq || p.square || p.c516x688 || p.c246x328,
+          isNew: false,
+        }))
+        .filter((p) => p.url);
+
       setCardPhotos(photosFromCard);
 
       pushLog("Текущая карточка WB получена");
@@ -121,6 +137,30 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const handleCancelCurrent = () => {
     setProcessingCurrent(false);
   };
+
+  async function savePhotoOrderToWB(updatedPhotos) {
+    try {
+      pushLog("🔄 Сохранение порядка фото в WB...");
+
+      // WBdagi eski rasmlar (isNew=false) tartibi bo‘yicha faqat URL + order
+      const photosOrder = updatedPhotos
+        .filter((p) => !p.isNew && p.url)
+        .map((p, index) => ({
+          url: p.url,
+          order: index + 1,
+        }));
+
+      await syncWbMedia(token, card.nmID, photosOrder, []); // yangi rasm yo‘q
+
+      pushLog("✔ Порядок фото обновлён в WB");
+      message.success("Порядок фото успешно обновлён в WB");
+    } catch (err) {
+      console.error(err);
+      message.error(err.message);
+      pushLog("❌ Ошибка: " + err.message);
+    }
+  }
+
 
   /** final inicializatsiya */
   const initFinalFromResult = (cardData, res) => {
@@ -335,11 +375,55 @@ export default function WorkspaceView({ token, username, onLogout }) {
     };
   }, [card, result, finalTitle, finalDescription, finalCharValues]);
 
-  const handleSubmitToWB = () => {
-    if (!finalData) return;
-    pushLog("📤 Отправка финальных данных в WB (пока только console.log)");
-    console.log("WB payload:", finalData);
-  };
+  async function handleSendToWB() {
+    try {
+      setProcessing(true);
+      pushLog("📤 Отправка данных в WB...");
+
+      if (!finalData) throw new Error("Нет данных для отправки");
+
+      // 1) CARD UPDATE
+      await updateWbCards(token, [
+        {
+          nmID: finalData.nmID,
+          vendorCode: card.vendorCode,
+          brand: finalData.brand,
+          title: finalData.title,
+          description: finalData.description,
+          dimensions: card.dimensions,
+          characteristics: finalData.characteristics,
+          sizes: card.sizes,
+        },
+      ]);
+
+      pushLog("✔️ Карточка обновлена");
+
+      // 2) NEW FILES (AI studiyadan kelganlar)
+      const newFiles = cardPhotos
+        .filter((p) => p.isNew && p.file)
+        .map((p) => p.file);
+
+      // 3) TARTIB – eski rasmlar URLlari bo‘yicha
+      const photosOrder = cardPhotos
+        .filter((p) => !p.isNew && p.url)
+        .map((p, index) => ({
+          url: p.url,
+          order: index + 1,
+        }));
+
+      await syncWbMedia(token, card.nmID, photosOrder, newFiles);
+
+      pushLog("✔️ Фото синхронизированы");
+      message.success("Карточка + фото успешно отправлены в WB");
+    } catch (err) {
+      console.error(err);
+      pushLog(`❌ Ошибка: ${err.message}`);
+      message.error(err.message);
+    } finally {
+      setProcessing(false);
+    }
+  }
+
 
   const handleDownloadJson = () => {
     if (!finalData) return;
@@ -400,11 +484,18 @@ export default function WorkspaceView({ token, username, onLogout }) {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
-    const newUrls = files.map((f) => URL.createObjectURL(f));
-    setCardPhotos((prev) => [...prev, ...newUrls]);
+    const newItems = files.map((f) => ({
+      photoId: null,     // WBda hali yo‘q
+      url: URL.createObjectURL(f),
+      file: f,
+      isNew: true,
+    }));
+
+    setCardPhotos((prev) => [...prev, ...newItems]);
 
     e.target.value = "";
   };
+
 
   const handleReorderPhotos = (newOrder) => {
     setCardPhotos(newOrder);
@@ -453,11 +544,11 @@ export default function WorkspaceView({ token, username, onLogout }) {
 
             {/* PHOTOS GRID */}
             <PhotosGrid
-              urls={cardPhotos}
+              photos={cardPhotos}
+              videoUrl={cardVideo}                // YANGI QATOR
               onGenerate={() => setPhotoStudioOpen(true)}
-              onReorder={handleReorderPhotos}
-              onSaveOrder={handleSavePhotosOrder}
-              onUploadClick={handleOpenUpload}
+              onReorder={(newOrder) => setCardPhotos(newOrder)}
+              onSaveOrder={savePhotoOrderToWB}
             />
 
             <input
@@ -504,7 +595,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
                 article={article || card?.nmID}
                 result={result}
                 finalData={finalData}
-                onSubmit={handleSubmitToWB}
+                onSubmit={handleSendToWB}
                 onDownload={handleDownloadJson}
               />
             )}

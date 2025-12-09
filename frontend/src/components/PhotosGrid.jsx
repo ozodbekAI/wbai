@@ -1,41 +1,34 @@
 // src/components/PhotosGrid.jsx
-import { useEffect, useState } from "react";
-import { Image, Plus, Save } from "lucide-react";
+import { Image, Plus, Save, ExternalLink } from "lucide-react";
 
 export default function PhotosGrid({
-  urls = [],
-  onGenerate,   // optional: открыть фотостудию
-  onReorder,    // optional: (newUrls: string[]) => void
-  onSaveOrder,  // optional
+  photos = [],          // [{ photoId, url, isNew, file? }]
+  videoUrl,
+  onGenerate,
+  onReorder,
+  onSaveOrder,
 }) {
-  const [order, setOrder] = useState(urls);
-
-  useEffect(() => {
-    setOrder(urls);
-  }, [urls]);
-
-  if (!order.length) return null;
+  if (!photos.length && !videoUrl) return null;
 
   const handleDragStart = (e, index) => {
-    e.dataTransfer.setData("text/plain", String(index));
+    e.dataTransfer.setData("index", String(index));
   };
 
   const handleDrop = (e, index) => {
     e.preventDefault();
-    const fromIndex = Number(e.dataTransfer.getData("text/plain"));
+    const fromIndex = Number(e.dataTransfer.getData("index"));
     if (Number.isNaN(fromIndex) || fromIndex === index) return;
 
-    const updated = [...order];
+    const updated = [...photos];
     const [moved] = updated.splice(fromIndex, 1);
     updated.splice(index, 0, moved);
-    setOrder(updated);
     onReorder && onReorder(updated);
   };
 
   const handleDragOver = (e) => e.preventDefault();
 
   const handleSave = () => {
-    onSaveOrder && onSaveOrder(order);
+    onSaveOrder && onSaveOrder(photos);
   };
 
   return (
@@ -43,8 +36,12 @@ export default function PhotosGrid({
       <div className="bg-gradient-to-r from-pink-500 to-rose-500 px-6 py-4 flex items-center justify-between">
         <h3 className="font-bold text-white text-lg flex items-center gap-2">
           <Image className="w-5 h-5" />
-          Фотографии товара ({order.length})
+          Медиа товара
+          <span className="text-xs opacity-80">
+            ({photos.length} фото{videoUrl ? " + видео" : ""})
+          </span>
         </h3>
+
         {onGenerate && (
           <button
             type="button"
@@ -58,19 +55,44 @@ export default function PhotosGrid({
       </div>
 
       <div className="p-6 space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-          {order.map((url, idx) => (
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 grid-flow-row-dense">
+          {videoUrl && (
+            <div className="aspect-square">
+              <div className="relative w-full h-full rounded-xl overflow-hidden border-2 border-purple-300 shadow-sm bg-black">
+                <video
+                  src={videoUrl}
+                  controls
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute left-2 top-2 bg-black/70 text-white text-xs px-2 py-1 rounded-md">
+                  Видео товара
+                </div>
+                <button
+                  type="button"
+                  className="absolute right-2 bottom-2 bg-black/70 hover:bg-black text-white rounded-full p-1.5 transition"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(videoUrl, "_blank");
+                  }}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {photos.map((p, idx) => (
             <button
-              key={url + idx}
+              key={(p.photoId ?? p.url) + idx}
               className="aspect-square cursor-move"
-              onClick={() => window.open(url, "_blank")}
+              onClick={() => window.open(p.url, "_blank")}
               draggable
               onDragStart={(e) => handleDragStart(e, idx)}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, idx)}
             >
               <img
-                src={url}
+                src={p.url}
                 alt={`Фото ${idx + 1}`}
                 className="w-full h-full object-cover rounded-xl border-2 border-gray-200 hover:border-purple-400 transition-all hover:scale-[1.02]"
               />
@@ -78,7 +100,7 @@ export default function PhotosGrid({
           ))}
         </div>
 
-        {onSaveOrder && (
+        {onSaveOrder && !!photos.length && (
           <div className="flex justify-end">
             <button
               type="button"
@@ -86,7 +108,7 @@ export default function PhotosGrid({
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-semibold shadow-md hover:bg-purple-700 transition-all"
             >
               <Save className="w-4 h-4" />
-              Сохранить изменения
+              Обновить порядок в WB
             </button>
           </div>
         )}

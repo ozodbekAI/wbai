@@ -5,7 +5,7 @@ from core.config import settings
 from core.database import init_db
 from routers import auth, process, process_batch, history
 from routers.admin import users, admin_promts, keywords, photo_template
-from routers import photo_templates, photo_generator
+from routers import photo_templates, photo_generator, wb_media, wb_cards
 
 
 # Initialize database
@@ -39,6 +39,9 @@ app.include_router(photo_template.router, prefix="", tags=["Admin - Photo Templa
 
 app.include_router(photo_templates.router)
 app.include_router(photo_generator.router)
+
+app.include_router(wb_cards.router, prefix="/api", tags=["WB - Cards"])
+app.include_router(wb_media.router, prefix="/api", tags=["WB - Media"])
 
 
 @app.get("/")
