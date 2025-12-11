@@ -1,3 +1,4 @@
+// frontend/src/api/client.js
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -5,7 +6,6 @@ export async function request(
   path,
   { method = "GET", token, body, params } = {}
 ) {
-  // URL ni query bilan yig‘amiz
   const urlObj = new URL(`${API_URL}${path}`);
 
   if (params && typeof params === "object") {
@@ -167,6 +167,7 @@ export const api = {
   },
 
   photo: {
+    // ===== Scenes =====
     scenes: {
       listCategories: (token) =>
         request("/api/photo/scenes/categories", { method: "GET", token }),
@@ -204,11 +205,14 @@ export const api = {
         }),
 
       createSubcategory: (token, categoryId, payload) =>
-        request(`/api/admin/photo/scenes/categories/${categoryId}/subcategories`, {
-          method: "POST",
-          token,
-          body: payload,
-        }),
+        request(
+          `/api/admin/photo/scenes/categories/${categoryId}/subcategories`,
+          {
+            method: "POST",
+            token,
+            body: payload,
+          }
+        ),
 
       updateSubcategory: (token, id, payload) =>
         request(`/api/admin/photo/scenes/subcategories/${id}`, {
@@ -244,6 +248,7 @@ export const api = {
         }),
     },
 
+    // ===== Poses =====
     poses: {
       listGroups: (token) =>
         request("/api/photo/poses/groups", { method: "GET", token }),
@@ -321,7 +326,74 @@ export const api = {
         }),
     },
 
-    // ===== PHOTO GENERATION ENDPOINTS =====
+    // ===== MODELS (normalize uchun) =====
+    models: {
+      listCategories: (token) =>
+        request("/api/photo/models/categories", { method: "GET", token }),
+
+      listSubcategories: (token, categoryId) =>
+        request(`/api/photo/models/categories/${categoryId}/subcategories`, {
+          method: "GET",
+          token,
+        }),
+
+      listItems: (token, subId) =>
+        request(`/api/photo/models/subcategories/${subId}/items`, {
+          method: "GET",
+          token,
+        }),
+
+      createCategory: (token, payload) =>
+        request("/api/admin/photo/models/categories", {
+          method: "POST",
+          token,
+          body: payload,
+        }),
+
+      deleteCategory: (token, id) =>
+        request(`/api/admin/photo/models/categories/${id}`, {
+          method: "DELETE",
+          token,
+        }),
+
+      createSubcategory: (token, categoryId, payload) =>
+        request(
+          `/api/admin/photo/models/categories/${categoryId}/subcategories`,
+          {
+            method: "POST",
+            token,
+            body: payload,
+          }
+        ),
+
+      deleteSubcategory: (token, id) =>
+        request(`/api/admin/photo/models/subcategories/${id}`, {
+          method: "DELETE",
+          token,
+        }),
+
+      createItem: (token, subId, payload) =>
+        request(`/api/admin/photo/models/subcategories/${subId}/items`, {
+          method: "POST",
+          token,
+          body: payload,
+        }),
+
+      updateItem: (token, id, payload) =>
+        request(`/api/admin/photo/models/items/${id}`, {
+          method: "PUT",
+          token,
+          body: payload,
+        }),
+
+      deleteItem: (token, id) =>
+        request(`/api/admin/photo/models/items/${id}`, {
+          method: "DELETE",
+          token,
+        }),
+    },
+
+    // ===== GENERATION ENDPOINTS =====
     generateScene: (token, { photo_url, item_id }) =>
       request("/api/photo/generate/scene", {
         method: "POST",
@@ -329,7 +401,6 @@ export const api = {
         body: { photo_url, item_id },
       }),
 
-    // pose
     generatePose: (token, { photo_url, prompt_id }) =>
       request("/api/photo/generate/pose", {
         method: "POST",
@@ -337,12 +408,59 @@ export const api = {
         body: { photo_url, prompt_id },
       }),
 
-    // custom
     generateCustom: (token, { photo_url, prompt, translate_to_en = true }) =>
       request("/api/photo/generate/custom", {
         method: "POST",
         token,
         body: { photo_url, prompt, translate_to_en },
+      }),
+
+    enhancePhoto: (token, { photo_url, level = "medium" }) =>
+      request("/api/photo/generate/enhance", {
+        method: "POST",
+        token,
+        body: { photo_url, level },
+      }),
+
+    generateVideo: (
+      token,
+      {
+        photo_url,
+        prompt,
+        duration = 5,
+        resolution = "1280x720",
+        model = "grok/minimax-2.5",
+        translate_to_en = true,
+      }
+    ) =>
+      request("/api/photo/generate/video", {
+        method: "POST",
+        token,
+        body: {
+          photo_url,
+          prompt,
+          duration,
+          resolution,
+          model,
+          translate_to_en,
+        },
+      }),
+
+    // 🔹 MUHIM: uploadPhoto – backenddagi /api/photo/upload bilan ishlaydi
+    uploadPhoto: (token, file) => {
+      const form = new FormData();
+      form.append("file", file);
+      return request("/api/photo/upload", {
+        method: "POST",
+        token,
+        body: form,
+      });
+    },
+
+    deleteFile: (token, fileName) =>
+      request(`/api/photo/files/${encodeURIComponent(fileName)}`, {
+        method: "DELETE",
+        token,
       }),
   },
 };

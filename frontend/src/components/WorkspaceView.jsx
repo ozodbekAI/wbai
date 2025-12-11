@@ -24,7 +24,7 @@ import FinalPanel from "./FinalPanel";
 import HistorySidebar from "./HistorySidebar";
 import PromptsPanel from "./PromptsPanel";
 import ValidationIssuesPanel from "./ValidationIssuesPanel";
-import PhotoAiEditor from "./PhotoAiEditor";
+import PhotoStudio from "./PhotoAiEditor";
 import PhotoTemplatesPanel from "./PhotoTemplatesPanel";
 import PhotosGrid from "./PhotosGrid";
 import { syncWbMedia } from "../api/wbMediaApi";
@@ -59,6 +59,13 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const [historyItems, setHistoryItems] = useState([]);
   const [historyStats, setHistoryStats] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  const handleOpenPhotoStudio = () => setPhotoStudioOpen(true);
+  const handleClosePhotoStudio = () => setPhotoStudioOpen(false);
+
+  const handleUpdateCardPhotos = (newPhotos) => {
+    setCardPhotos(newPhotos);
+  };
 
   // PROMPTS / PHOTO TEMPLATES
   const [promptsOpen, setPromptsOpen] = useState(false);
@@ -514,9 +521,10 @@ export default function WorkspaceView({ token, username, onLogout }) {
       <HeaderBar
         username={username}
         onLogout={onLogout}
-        onOpenPrompts={handleOpenPrompts}
-        onOpenPhotoSettings={handleOpenPhotoTemplates}
-        onDownloadExcel={handleDownloadExcel}
+        onOpenPrompts={() => setPromptsOpen(true)}
+        onOpenPhotoSettings={() => setPhotoTemplatesOpen(true)}
+        onOpenPhotoStudio={handleOpenPhotoStudio} // NEW
+        onDownloadExcel={() => console.log("Download Excel")}
       />
 
       <main className="max-w-[1800px] mx-auto px-6 py-6">
@@ -622,24 +630,24 @@ export default function WorkspaceView({ token, username, onLogout }) {
       {/* PROMPTS ADMIN PANEL */}
       <PromptsPanel
         open={promptsOpen}
-        onClose={handleClosePrompts}
+        onClose={() => setPromptsOpen(false)}
         token={token}
       />
 
       {/* PHOTO TEMPLATES ADMIN PANEL */}
       <PhotoTemplatesPanel
         open={photoTemplatesOpen}
-        onClose={handleClosePhotoTemplates}
+        onClose={() => setPhotoTemplatesOpen(false)}
         token={token}
       />
 
       {/* PHOTO AI EDITOR MODAL */}
-      {photoStudioOpen && cardPhotos.length > 0 && (
-        <PhotoAiEditor
+      {photoStudioOpen && (
+        <PhotoStudio
           token={token}
-          urls={cardPhotos}
-          onAddPhoto={(newUrl) => setCardPhotos((prev) => [...prev, newUrl])}
-          onClose={() => setPhotoStudioOpen(false)}
+          cardPhotos={cardPhotos}
+          onUpdateCardPhotos={handleUpdateCardPhotos}
+          onClose={handleClosePhotoStudio}
         />
       )}
     </div>
