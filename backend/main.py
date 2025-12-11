@@ -1,12 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.database import init_db
+
 from routers import auth, process, process_batch, history
 from routers.admin import users, admin_promts, keywords, photo_template
 from routers import photo_templates, photo_generator, wb_media, wb_cards
+from routers import photo_models, admin_photo_models  # MUHIM: router modulini import
 
+from routers import photo_upload_router
 
 # Initialize database
 init_db()
@@ -32,6 +36,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(process.router, prefix="/api/process", tags=["Processing"])
 app.include_router(process_batch.router, prefix="/api/batch", tags=["Batch Processing"])
 app.include_router(history.router, prefix="/api/history", tags=["History"])
+
 app.include_router(users.router, prefix="/api/admin", tags=["Admin - Users"])
 app.include_router(admin_promts.router, prefix="/api/admin", tags=["Admin - Prompts"])
 app.include_router(keywords.router, prefix="/api/admin", tags=["Admin - Keywords"])
@@ -42,6 +47,15 @@ app.include_router(photo_generator.router)
 
 app.include_router(wb_cards.router, prefix="/api", tags=["WB - Cards"])
 app.include_router(wb_media.router, prefix="/api", tags=["WB - Media"])
+
+# MUHIM: photo_models modulidagi ikkala routerni alohida ulaymiz
+app.include_router(admin_photo_models)
+app.include_router(photo_models)
+
+app.include_router(photo_upload_router)
+
+# Media fayllar
+app.mount("/media", StaticFiles(directory=settings.MEDIA_ROOT), name="media")
 
 
 @app.get("/")

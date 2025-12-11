@@ -1,6 +1,6 @@
 # core/config.py
 from pathlib import Path
-from typing import List, Optional
+from typing import ClassVar, List, Optional
 from pydantic_settings import BaseSettings
 
 
@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     DB_NAME: str = "wb_cards"
     DB_USER: str = "postgres"
     DB_PASSWORD: str = "postgres"
+
+    MEDIA_ROOT: str = "media"
+    PUBLIC_BASE_URL: str = "https://wbcheker.ozodbek-akramov.uz"
 
     DATABASE_URL: Optional[str] = None
 

@@ -390,6 +390,50 @@ class KIEService:
 
     # ===== VIDEO / SIMPLE EDITS =====
 
+    async def enhance_photo(self, photo_url: str, level: str = "medium") -> dict:
+        """
+        Улучшение качества фото: резкость, освещение, цвета, удаление шума
+        
+        Args:
+            photo_url: URL исходного фото
+            level: "light", "medium", "strong"
+        """
+        model = "google/nano-banana-edit"
+        
+        # Промпт в зависимости от уровня
+        prompts = {
+            "light": (
+                "Light photo enhancement: slightly improve sharpness, "
+                "brightness and colors. Keep natural look. Professional photography quality."
+            ),
+            "medium": (
+                "Medium photo enhancement: improve sharpness, adjust lighting, "
+                "enhance colors, reduce noise. High-quality professional result."
+            ),
+            "strong": (
+                "Strong photo enhancement: significantly improve sharpness, "
+                "optimize lighting, vivid colors, remove all noise, "
+                "professional studio quality result."
+            )
+        }
+        
+        prompt = prompts.get(level, prompts["medium"])
+        
+        input_data = {
+            "prompt": prompt,
+            "image_urls": [photo_url],
+            "output_format": "png",
+            "image_size": "original",  # сохраняем оригинальный размер
+        }
+        
+        task_id = await asyncio.to_thread(self.create_task, model, input_data)
+        result = await self.poll_task(task_id)
+        
+        if "resultUrls" in result and result["resultUrls"]:
+            return {"image": await self.download_image(result["resultUrls"][0])}
+        
+        raise ValueError("No image in result")
+
     async def generate_video(
         self,
         image_url: str,

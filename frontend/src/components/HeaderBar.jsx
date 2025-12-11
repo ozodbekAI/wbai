@@ -1,10 +1,10 @@
-// src/components/HeaderBar.jsx
 import {
   LogOut,
   Settings,
   Package,
   Download,
-  Image as ImageIcon,
+  ImageIcon,
+  Image, // 🔁 Images o‘rniga
 } from "lucide-react";
 
 export default function HeaderBar({
@@ -12,6 +12,7 @@ export default function HeaderBar({
   onLogout,
   onOpenPrompts,
   onOpenPhotoSettings,
+  onOpenPhotoStudio, // NEW
   onDownloadExcel,
 }) {
   return (
@@ -41,6 +42,17 @@ export default function HeaderBar({
             >
               <Download className="w-4 h-4" />
               Скачать в Excel
+            </button>
+          )}
+
+          {/* NEW: Photo Studio Button */}
+          {onOpenPhotoStudio && (
+            <button
+              onClick={onOpenPhotoStudio}
+              className="px-4 py-2 bg-gradient-to-r from-violet-50 to-purple-50 text-violet-700 hover:from-violet-100 hover:to-purple-100 rounded-xl font-medium transition-all flex items-center gap-2 border border-violet-200 shadow-sm hover:shadow-md"
+            >
+              <Image className="w-4 h-4" /> {/* 🔁 Images o‘rniga */}
+              Раски
             </button>
           )}
 
