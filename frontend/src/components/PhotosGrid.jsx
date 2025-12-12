@@ -9,6 +9,7 @@ export default function PhotosGrid({
   onSaveOrder,
   onUploadClick,        // YANGI
   onDeletePhoto,        // YANGI (idx, photo)
+  onDeleteVideo,
 }) {
   if (!photos.length && !videoUrl) return null;
 
@@ -92,6 +93,18 @@ export default function PhotosGrid({
                 >
                   <ExternalLink className="w-4 h-4" />
                 </button>
+                {onDeleteVideo && (
+                    <button
+                      type="button"
+                      className="absolute top-2 right-2 bg-red-600 text-white rounded-full p-1.5 hover:bg-red-700 transition"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteVideo();
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
               </div>
             </div>
           )}

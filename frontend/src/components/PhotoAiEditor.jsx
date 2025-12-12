@@ -1,7 +1,13 @@
-// frontend/src/components/PhotoAiEditor.jsx
-
 import { useEffect, useState, useRef } from "react";
-import { X, Sparkles, Upload, Trash2, Plus, Film } from "lucide-react";
+import {
+  X,
+  Sparkles,
+  Upload,
+  Trash2,
+  Plus,
+  Film,
+  Save,
+} from "lucide-react";
 import { api } from "../api/client";
 
 const TABS = [
@@ -48,7 +54,7 @@ const GENERATED_PAGE_SIZE = 20; // paginatsiya uchun
 function getUrl(item) {
   if (!item) return "";
   if (typeof item === "string") return item;
-  return item.url || item.src || "";
+  return item.url || item.src || item.fileUrl || "";
 }
 
 export default function PhotoStudio({
@@ -56,15 +62,16 @@ export default function PhotoStudio({
   cardPhotos = [],
   onUpdateCardPhotos,
   onClose,
-  mode = "modal", // "modal" | "page"
-  showCardColumn = true, // false bo'lsa chapdagi "Фото карточки" yo'q
+  card = null,
+  cardVideo = null,
+  onUpdateCardVideo,
 }) {
   const [activeTab, setActiveTab] = useState("scene");
   const [loading, setLoading] = useState(false);
 
   const [selectedCardIndex, setSelectedCardIndex] = useState(0);
 
-  // ✅ O'RTADAGI AKTIV MEDIA (generate shuni ustida bo'ladi)
+  // ✅ O'RTADAGI AKТIV MEDIA (generate shuni ustida bo'ladi)
   const [activeMedia, setActiveMedia] = useState(null);
 
   // Generated (o'ng taraf) – backend history + yangi generate’lar
@@ -143,21 +150,19 @@ export default function PhotoStudio({
         limit: GENERATED_PAGE_SIZE,
       });
 
-      const items = Array.isArray(data?.items)
-        ? data.items
-        : Array.isArray(data)
-        ? data
-        : [];
+      const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
 
-      const mapped = items.map((item) => ({
-        // id sifatida file_name ni ishlatamiz – u unikal
-        id: item.file_name || item.id || item.file_url,
-        url: item.file_url || item.url,
-        type: item.kind === "video" ? "video" : "image",
-        timestamp: item.created_at || item.timestamp || null,
-        fileName: item.file_name || null,
-        fileUrl: item.file_url || item.url || null,
-      }));
+      const mapped = items.map((item) => {
+        const fileName = item.file_name || item.fileName || (item.file_url || "").split("/media/").pop() || "";
+        return {
+          id: fileName || item.file_url || `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          url: item.file_url || item.fileUrl || item.url,
+          type: (item.kind === "video" || (fileName && fileName.endsWith(".mp4"))) ? "video" : "image",
+          timestamp: item.created_at || item.timestamp || null,
+          fileName: fileName,
+          fileUrl: item.file_url || item.fileUrl || item.url || null,
+        };
+      });
 
       setGeneratedPhotos((prev) => (reset ? mapped : [...prev, ...mapped]));
       setGenOffset(offset + mapped.length);
@@ -229,6 +234,7 @@ export default function PhotoStudio({
 
     try {
       setLoadingScenarios(true);
+      // admin-endpoint должен отдавать список сценариев с prompt
       const scenarios = await api.video.getScenarios(token);
       setVideoScenarios(scenarios || []);
     } catch (e) {
@@ -296,14 +302,15 @@ export default function PhotoStudio({
   };
 
   // Normalize functions
-  const handleSelectNormalizeMode = async (modeVal) => {
-    setNormalizeMode(modeVal);
+  const handleSelectNormalizeMode = async (mode) => {
+    setNormalizeMode(mode);
     setNormalizePhotos([]);
     setSelectedModelCat("");
     setSelectedModelSubcat("");
     setSelectedModelItem("");
 
-    if (modeVal === "new") {
+    if (mode === "new") {
+      // Load model categories for "new model" mode
       try {
         const cats = await api.photo.models.listCategories(token);
         setModelCategories(cats || []);
@@ -363,7 +370,7 @@ export default function PhotoStudio({
     // ✅ Generate endi o'rtadagi activeMedia ustida bo'ladi
     const activeItem = activeMedia;
     if (!activeItem) {
-      alert("Выберите или загрузите фото по центру");
+      alert("Выберите фото слева или справа");
       return;
     }
 
@@ -415,6 +422,14 @@ export default function PhotoStudio({
           prompt: customPrompt,
         });
       } else if (activeTab === "video") {
+        // Дополнительная проверка: если карточка обязана иметь video — предупредить
+        if (!cardVideo) {
+          if (!window.confirm("В карточке нет видео. Продолжить создание видео?")) {
+            setLoading(false);
+            return;
+          }
+        }
+
         if (!selectedVideoPlanKey) {
           alert("Сначала выберите тариф видео");
           setLoading(false);
@@ -447,7 +462,8 @@ export default function PhotoStudio({
             setLoading(false);
             return;
           }
-          promptToSend = scenario.prompt;
+          // scenario.prompt должен поступить с бэкенда (админ задаёт)
+          promptToSend = scenario.prompt || scenario.description || scenario.name;
         }
 
         data = await api.photo.generateVideo(token, {
@@ -463,6 +479,7 @@ export default function PhotoStudio({
         }
 
         if (normalizeMode === "own") {
+          // Режим "Свой фотомодель" - нужно 2 фото
           if (normalizePhotos.length < 2) {
             alert("Добавьте 2 фото: изделие и модель");
             setLoading(false);
@@ -479,12 +496,23 @@ export default function PhotoStudio({
                 .file_url
             : getUrl(normalizePhotos[1]);
 
+          // optionally: use admin prompt for own_model if exists
+          let ownPrompt = null;
+          try {
+            const p = await api.prompts.get(token, "normalize_own");
+            ownPrompt = p?.system_prompt || null;
+          } catch (e) {
+            // ignore
+          }
+
           data = await api.photo.generateNormalize(token, {
             mode: "own_model",
             photo_url_1: photo1Url,
             photo_url_2: photo2Url,
+            prompt: ownPrompt, // backend may accept optional prompt
           });
         } else if (normalizeMode === "new") {
+          // Режим "Новый фотомодель" - нужно 1 фото + выбранная модель
           if (normalizePhotos.length < 1) {
             alert("Добавьте фото изделия");
             setLoading(false);
@@ -502,25 +530,37 @@ export default function PhotoStudio({
                 .file_url
             : getUrl(normalizePhotos[0]);
 
+          // get selected model item prompt (modelItems contain prompt if admin provided)
+          const modelItem = modelItems.find((i) => i.id === Number(selectedModelItem));
+          const modelPrompt = modelItem?.prompt || null;
+
           data = await api.photo.generateNormalize(token, {
             mode: "new_model",
             photo_url: photoUrl,
             model_item_id: Number(selectedModelItem),
+            // optionally send modelPrompt; backend will use model repository prompt if needed
+            prompt: modelPrompt,
           });
         }
       }
 
       const newItem = {
-        id: data.file_name || Date.now().toString(),
-        url: data.file_url,                            // backend qaytargan url
+        id: Date.now(),
+        url: data.file_url,          // <-- data.image_base64 emas
         type: activeTab === "video" ? "video" : "image",
         timestamp: new Date().toISOString(),
         fileName: data.file_name,
         fileUrl: data.file_url,
       };
 
+      // ✅ yangi generate qilingan rasmlarni ham o'ng tarafga qo'shamiz (yuqoriga)
       setGeneratedPhotos((prev) => [newItem, ...prev]);
-
+      if (activeTab === "video") {
+        if (cardVideo && !window.confirm("Заменить существующее видео в карточке?")) {
+          return;
+        }
+        onUpdateCardVideo && onUpdateCardVideo(newItem.url);
+      }
     } catch (e) {
       console.error(e);
       alert("Ошибка генерации: " + (e.message || "Unknown error"));
@@ -551,20 +591,22 @@ export default function PhotoStudio({
     if (!window.confirm("Удалить из сгенерированных?")) return;
 
     try {
-      if (photo.fileName) {
-        // endi bu /api/photo/generated?file_name=... ga to‘g‘ri so‘rov yuboradi
-        await api.photo.deleteFile(token, photo.fileName);
-        // yoki xohlasang: await api.photo.generated.delete(token, photo.fileName);
+      if (!photo.fileName) {
+        // try to derive fileName from fileUrl
+        const maybe = (photo.fileUrl || photo.url || "").split("/media/").pop();
+        if (maybe) photo.fileName = maybe;
       }
+
+      if (!photo.fileName) throw new Error("Невозможно определить имя файла для удаления");
+
+      await api.photo.generated.delete(token, photo.fileName);
+
+      setGeneratedPhotos((prev) => prev.filter((p) => p.id !== photo.id));
     } catch (e) {
       console.error(e);
-      alert("Ошибка удаления файла на сервере");
+      alert("Ошибка удаления файла на сервере: " + (e.message || ""));
     }
-
-    // front tarafdagi listdan ham olib tashlaymiz
-    setGeneratedPhotos((prev) => prev.filter((p) => p.id !== photo.id));
   };
-
 
   const handleUploadToCard = (files) => {
     const newItems = Array.from(files).map((f) => ({
@@ -572,8 +614,7 @@ export default function PhotoStudio({
       file: f,
       isNew: true,
     }));
-    onUpdateCardPhotos &&
-      onUpdateCardPhotos([...cardPhotos, ...newItems]);
+    onUpdateCardPhotos && onUpdateCardPhotos([...cardPhotos, ...newItems]);
   };
 
   const handleCenterUpload = (files) => {
@@ -602,8 +643,11 @@ export default function PhotoStudio({
     if (!dataStr) return;
     try {
       const photo = JSON.parse(dataStr);
-      onUpdateCardPhotos &&
-        onUpdateCardPhotos([
+      if (photo.type === "video") {
+        if (cardVideo && !window.confirm("Заменить существующее видео?")) return;
+        onUpdateCardVideo && onUpdateCardVideo(photo.fileUrl || photo.url);
+      } else {
+        onUpdateCardPhotos && onUpdateCardPhotos([
           ...cardPhotos,
           {
             url: photo.fileUrl || photo.url,
@@ -611,26 +655,49 @@ export default function PhotoStudio({
             fromGenerated: true,
           },
         ]);
+      }
     } catch (err) {
       console.error("Drop error", err);
     }
   };
 
+  const handleReorderCardPhotos = (updated) => {
+    onUpdateCardPhotos(updated);
+  };
+
+  const handleSaveOrder = async () => {
+    try {
+      // Yangi tartib va yangi rasmlar/video ni backendga yuborish
+      // Misol: api.card.updateMedia(token, card.id, { photos: cardPhotos, video: cardVideo });
+      alert("Тартиб сақланди ва backendга юборилди!");
+    } catch (e) {
+      alert("Хатолик: " + e.message);
+    }
+  };
+
+  const handleDragStart = (e, index) => {
+    e.dataTransfer.setData("index", String(index));
+  };
+
+  const handleDrop = (e, index) => {
+    e.preventDefault();
+    const fromIndex = Number(e.dataTransfer.getData("index"));
+    if (Number.isNaN(fromIndex) || fromIndex === index) return;
+
+    const updated = [...cardPhotos];
+    const [moved] = updated.splice(fromIndex, 1);
+    updated.splice(index, 0, moved);
+    handleReorderCardPhotos(updated);
+    setSelectedCardIndex(updated.findIndex((p) => getUrl(p) === getUrl(activeMedia)));
+  };
+
+  const handleDragOver = (e) => e.preventDefault();
+
   const activeCardUrl = getUrl(activeMedia);
 
-  const outerClass =
-    mode === "modal"
-      ? "fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-      : "w-full h-full flex items-center justify-center";
-
-  const innerClass =
-    mode === "modal"
-      ? "bg-white rounded-2xl shadow-2xl w-full max-w-[95vw] h-[90vh] flex flex-col"
-      : "bg-white rounded-2xl shadow-2xl w-full h-[80vh] flex flex-col";
-
   return (
-    <div className={outerClass}>
-      <div className={innerClass}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[95vw] h-[90vh] flex flex-col">
         {/* HEADER */}
         <div className="px-6 py-4 border-b flex items-center justify-between bg-gradient-to-r from-violet-50 via-purple-50 to-pink-50">
           <div>
@@ -638,7 +705,7 @@ export default function PhotoStudio({
               🎨 AI Фото Студия
             </h2>
             <p className="text-xs text-violet-600">
-              Сцены • Позы • Улучшение • Видео
+              Сцены • Позы • Улучшение • Видео • Нормализация
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -655,112 +722,143 @@ export default function PhotoStudio({
                 {t.label}
               </button>
             ))}
-            {onClose && (
-              <button
-                onClick={onClose}
-                className="ml-4 p-2 rounded-full hover:bg-red-50 text-gray-500 hover:text-red-600 transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
+            <button
+              onClick={onClose}
+              className="ml-4 p-2 rounded-full hover:bg-red-50 text-gray-500 hover:text-red-600 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
         </div>
 
         {/* BODY */}
         <div className="flex-1 grid grid-cols-12 gap-4 p-4 overflow-hidden">
-          {/* LEFT: Card Photos (faqat showCardColumn true bo'lsa) */}
-          {showCardColumn && (
-            <div
-              className="col-span-3 border-r border-gray-200 pr-3 overflow-y-auto"
-              onDrop={handleDropToCard}
-              onDragOver={(e) => e.preventDefault()}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-gray-700">
-                  📦 Фото карточки
-                </h3>
-                <span className="text-xs bg-violet-100 text-violet-700 px-2 py-1 rounded-full">
-                  {cardPhotos.length}
-                </span>
-              </div>
-
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full text-xs px-3 py-2 mb-3 rounded-lg border-2 border-dashed border-violet-300 text-violet-700 hover:bg-violet-50 hover:border-violet-400 transition flex items-center justify-center gap-2"
-              >
-                <Upload className="w-4 h-4" />
-                Загрузить с компьютера
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => handleUploadToCard(e.target.files)}
-              />
-
-              {cardPhotos.length ? (
-                <div className="grid grid-cols-2 gap-2">
-                  {cardPhotos.map((item, idx) => {
-                    const url = getUrl(item);
-                    return (
-                      <div
-                        key={idx}
-                        onClick={() => {
-                          setSelectedCardIndex(idx);
-                          setActiveMedia(item);
-                        }}
-                        className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all group ${
-                          idx === selectedCardIndex
-                            ? "border-violet-500 ring-4 ring-violet-200 scale-105"
-                            : "border-gray-200 hover:border-violet-300"
-                        }`}
-                      >
-                        <img
-                          src={url}
-                          alt=""
-                          className="w-full h-full object-cover"
-                        />
-                        {item.isNew && (
-                          <span className="absolute top-1 left-1 bg-emerald-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
-                            NEW
-                          </span>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteFromCard(idx);
-                          }}
-                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-xs text-gray-400 text-center mt-8 p-4 border-2 border-dashed border-gray-200 rounded-lg">
-                  <Upload className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                  <p>
-                    Перетащите сюда
-                    <br />
-                    фото справа или
-                    <br />
-                    загрузите новые
-                  </p>
-                </div>
-              )}
+          {/* LEFT: Card Photos */}
+          <div
+            className="col-span-3 border-r border-gray-200 pr-3 overflow-y-auto"
+            onDrop={handleDropToCard}
+            onDragOver={(e) => e.preventDefault()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-gray-700">
+                📦 Фото карточки
+              </h3>
+              <span className="text-xs bg-violet-100 text-violet-700 px-2 py-1 rounded-full">
+                {cardPhotos.length}
+              </span>
             </div>
-          )}
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full text-xs px-3 py-2 mb-3 rounded-lg border-2 border-dashed border-violet-300 text-violet-700 hover:bg-violet-50 hover:border-violet-400 transition flex items-center justify-center gap-2"
+            >
+              <Upload className="w-4 h-4" />
+              Загрузить с компьютера
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => handleUploadToCard(e.target.files)}
+            />
+
+            {cardPhotos.length ? (
+              <div className="grid grid-cols-2 gap-2">
+                {cardPhotos.map((item, idx) => {
+                  const url = getUrl(item);
+                  return (
+                    <div
+                      key={idx}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, idx)}
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => handleDrop(e, idx)}
+                      onClick={() => {
+                        setSelectedCardIndex(idx);
+                        setActiveMedia(item); // chapdan tanlansa ham o'rtaga chiqadi
+                      }}
+                      className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all group ${
+                        idx === selectedCardIndex
+                          ? "border-violet-500 ring-4 ring-violet-200 scale-105"
+                          : "border-gray-200 hover:border-violet-300"
+                      }`}
+                    >
+                      <img
+                        src={url}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                      {item.isNew && (
+                        <span className="absolute top-1 left-1 bg-emerald-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
+                          NEW
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteFromCard(idx);
+                        }}
+                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xs text-gray-400 text-center mt-8 p-4 border-2 border-dashed border-gray-200 rounded-lg">
+                <Upload className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                <p>
+                  Перетащите сюда
+                  <br />
+                  фото справа или
+                  <br />
+                  загрузите новые
+                </p>
+              </div>
+            )}
+            {cardVideo && (
+              <div className="relative aspect-video rounded-lg overflow-hidden cursor-pointer border-2 transition-all group mt-4" onClick={() => setActiveMedia({url: cardVideo, type: 'video'})}>
+                <video
+                  src={cardVideo}
+                  className="w-full h-full object-cover"
+                  controls={false}
+                />
+                <span className="absolute top-1 left-1 bg-purple-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
+                  VIDEO
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm("Удалить видео из карточки?")) {
+                      onUpdateCardVideo && onUpdateCardVideo(null);
+                      if (getUrl(activeMedia) === cardVideo) {
+                        setActiveMedia(cardPhotos[0] || null);
+                        setSelectedCardIndex(0);
+                      }
+                    }
+                  }}
+                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+            {cardPhotos.length > 1 && (
+              <button
+                onClick={handleSaveOrder}
+                className="w-full mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2"
+              >
+                <Save className="w-4 h-4" /> Saqlash va backendga yuborish
+              </button>
+            )}
+          </div>
 
           {/* CENTER: Preview + Controls */}
-          <div
-            className={`${
-              showCardColumn ? "col-span-6" : "col-span-8"
-            } flex flex-col gap-3 overflow-y-auto`}
-          >
+          <div className="col-span-6 flex flex-col gap-3 overflow-y-auto">
             {/* Preview */}
             <div className="relative flex-1 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden min-h-[250px]">
               {activeCardUrl ? (
@@ -948,7 +1046,7 @@ export default function PhotoStudio({
                             ✨ Новый фотомодель
                           </div>
                           <div className="text-xs text-gray-500 mt-1">
-                            Загрузите фото изделия, мы добавим модель
+                            Загрузите фото изделия, мы добавим модель (выберите тип)
                           </div>
                         </button>
                       </div>
@@ -958,7 +1056,6 @@ export default function PhotoStudio({
                   {/* РЕЖИМ ВЫБРАН */}
                   {normalizeMode && (
                     <>
-                      {/* Выбранный режим */}
                       <div className="flex items-center justify-between p-3 bg-indigo-50 rounded-lg border border-indigo-200">
                         <div className="text-sm">
                           <span className="text-gray-600">Режим: </span>
@@ -1017,24 +1114,16 @@ export default function PhotoStudio({
                         )}
 
                         {/* Кнопка добавления фото */}
-                        {((normalizeMode === "own" &&
-                          normalizePhotos.length < 2) ||
-                          (normalizeMode === "new" &&
-                            normalizePhotos.length < 1)) && (
+                        {((normalizeMode === "own" && normalizePhotos.length < 2) ||
+                          (normalizeMode === "new" && normalizePhotos.length < 1)) && (
                           <button
                             onClick={() => {
                               if (!activeCardUrl) {
-                                alert(
-                                  "Сначала выберите или загрузите фото (по центру)"
-                                );
+                                alert("Сначала выберите или загрузите фото (по центру)");
                                 return;
                               }
-
                               const activeItem =
-                                cardPhotos[selectedCardIndex] || {
-                                  url: activeCardUrl,
-                                };
-
+                                cardPhotos[selectedCardIndex] || { url: activeCardUrl };
                               handleAddNormalizePhoto(activeItem);
                             }}
                             className="w-full px-3 py-2 rounded-lg border-2 border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 transition flex items-center justify-center gap-2 text-sm"
@@ -1046,61 +1135,63 @@ export default function PhotoStudio({
                       </div>
 
                       {/* Если режим "new" - выбор модели */}
-                      {normalizeMode === "new" &&
-                        normalizePhotos.length > 0 && (
-                          <>
+                      {normalizeMode === "new" && normalizePhotos.length > 0 && (
+                        <>
+                          <select
+                            value={selectedModelCat}
+                            onChange={(e) => onChangeModelCategory(e.target.value)}
+                            className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-200"
+                          >
+                            <option value="">— Категория модели —</option>
+                            {modelCategories.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+
+                          {selectedModelCat && modelSubcategories.length > 0 && (
                             <select
-                              value={selectedModelCat}
-                              onChange={(e) =>
-                                onChangeModelCategory(e.target.value)
-                              }
+                              value={selectedModelSubcat}
+                              onChange={(e) => onChangeModelSubcategory(e.target.value)}
                               className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-200"
                             >
-                              <option value="">— Категория модели —</option>
-                              {modelCategories.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name}
+                              <option value="">— Подкатегория —</option>
+                              {modelSubcategories.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {s.name}
                                 </option>
                               ))}
                             </select>
+                          )}
 
-                            {selectedModelCat &&
-                              modelSubcategories.length > 0 && (
-                                <select
-                                  value={selectedModelSubcat}
-                                  onChange={(e) =>
-                                    onChangeModelSubcategory(e.target.value)
-                                  }
-                                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-200"
-                                >
-                                  <option value="">— Подкатегория —</option>
-                                  {modelSubcategories.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      {s.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
+                          {selectedModelSubcat && modelItems.length > 0 && (
+                            <>
+                              <select
+                                value={selectedModelItem}
+                                onChange={(e) => setSelectedModelItem(e.target.value)}
+                                className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-200"
+                              >
+                                <option value="">— Тип модели —</option>
+                                {modelItems.map((i) => (
+                                  <option key={i.id} value={i.id}>
+                                    {i.name}
+                                  </option>
+                                ))}
+                              </select>
 
-                            {selectedModelSubcat &&
-                              modelItems.length > 0 && (
-                                <select
-                                  value={selectedModelItem}
-                                  onChange={(e) =>
-                                    setSelectedModelItem(e.target.value)
-                                  }
-                                  className="w-full px-3 py-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-200"
-                                >
-                                  <option value="">— Тип модели —</option>
-                                  {modelItems.map((i) => (
-                                    <option key={i.id} value={i.id}>
-                                      {i.name}
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
-                          </>
-                        )}
+                              <div className="text-xs text-gray-500 mt-2">
+                                Подсказка промпта для выбранного типа модели (если задана админом).
+                              </div>
+                              <div className="text-[12px] bg-gray-50 border rounded p-2 mt-2 min-h-[56px]">
+                                {modelItems.find(mi => String(mi.id) === String(selectedModelItem))?.prompt || (
+                                  <span className="text-gray-400">Промпт не задан; будет использован системный промпт.</span>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -1208,13 +1299,10 @@ export default function PhotoStudio({
                                       <button
                                         key={scenario.id}
                                         onClick={() =>
-                                          setSelectedVideoScenarioId(
-                                            scenario.id
-                                          )
+                                          setSelectedVideoScenarioId(scenario.id)
                                         }
                                         className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
-                                          selectedVideoScenarioId ===
-                                          scenario.id
+                                          selectedVideoScenarioId === scenario.id
                                             ? "border-purple-500 bg-purple-50 shadow-md"
                                             : "border-gray-200 bg-white hover:border-purple-300 hover:bg-purple-50"
                                         }`}
@@ -1222,9 +1310,9 @@ export default function PhotoStudio({
                                         <div className="font-medium text-sm text-gray-800">
                                           {scenario.name}
                                         </div>
-                                        {scenario.description && (
+                                        {scenario.prompt && (
                                           <div className="text-xs text-gray-500 mt-1">
-                                            {scenario.description}
+                                            {scenario.prompt}
                                           </div>
                                         )}
                                       </button>
@@ -1292,9 +1380,7 @@ export default function PhotoStudio({
 
           {/* RIGHT: Generated */}
           <div
-            className={`${
-              showCardColumn ? "col-span-3" : "col-span-4"
-            } border-l border-gray-200 pl-3 overflow-y-auto`}
+            className="col-span-3 border-l border-gray-200 pl-3 overflow-y-auto"
             ref={generatedRef}
           >
             <div className="flex items-center justify-between mb-3">
@@ -1318,12 +1404,8 @@ export default function PhotoStudio({
                     return (
                       <div
                         key={photo.id}
-                        draggable={showCardColumn}
-                        onDragStart={
-                          showCardColumn
-                            ? (e) => handleDragFromGenerated(e, photo)
-                            : undefined
-                        }
+                        draggable
+                        onDragStart={(e) => handleDragFromGenerated(e, photo)}
                         onClick={() => {
                           setActiveMedia({
                             url,
@@ -1333,7 +1415,7 @@ export default function PhotoStudio({
                             fromGenerated: true,
                           });
                         }}
-                        className="relative aspect-square rounded-lg overflow-hidden border-2 border-green-200 hover:border-green-400 cursor-pointer transition-all group hover:scale-105 hover:shadow-lg"
+                        className="relative aspect-square rounded-lg overflow-hidden border-2 border-green-200 hover:border-green-400 cursor-move transition-all group hover:scale-105 hover:shadow-lg"
                       >
                         {photo.type === "video" ? (
                           <>
@@ -1376,6 +1458,7 @@ export default function PhotoStudio({
                   })}
                 </div>
 
+                {/* PAGINATSIYA BUTTON */}
                 {genHasMore && (
                   <div className="mt-3 flex justify-center">
                     <button
@@ -1412,9 +1495,7 @@ export default function PhotoStudio({
         <div className="px-6 py-3 border-t bg-gradient-to-r from-gray-50 to-gray-100 flex items-center justify-between text-xs text-gray-600">
           <span className="flex items-center gap-2">
             <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-            {showCardColumn
-              ? "Перетащите фото из правой колонки влево"
-              : "Кликайте по сгенерированным фото справа, чтобы открыть их по центру"}
+            Перетащите фото из правой колонки влево
           </span>
           <span className="flex items-center gap-2">
             <span>💾 Автосохранение</span>

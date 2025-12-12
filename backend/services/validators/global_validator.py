@@ -1,4 +1,4 @@
-def validation_card(card, subjects, allowed_values, colors_limits, charcs_limits):
+def validation_card(card, subjects, allowed_values, colors_limits, charcs_limits, conditional_skip):
     import difflib  
 
     messages = []
@@ -215,14 +215,14 @@ def validation_card(card, subjects, allowed_values, colors_limits, charcs_limits
                 ),
             )
 
-    if len(chars) < len(subjects_list):
+    if len(chars) < (len(subjects_list)-len(conditional_skip)):
         add_msg(
             level="warning",
             field="characteristics",
             code="CHAR_COUNT_LESS",
             message=(
                 f"Количество характеристик в карточке ({len(chars)}) меньше, "
-                f"чем в справочнике ({len(subjects_list)}). Возможны пропуски важной информации."
+                f"чем в справочнике ({len(subjects_list)-len(conditional_skip)}). Возможны пропуски важной информации."
             ),
         )
 

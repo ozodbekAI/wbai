@@ -140,6 +140,44 @@ export const api = {
       }),
   },
 
+  // ===== ADMIN VIDEO SCENARIOS =====
+  admin: {
+    videoScenarios: {
+      list: (token, { only_active = false } = {}) =>
+        request("/api/admin/video-scenarios", {
+          method: "GET",
+          token,
+          params: { only_active },
+        }),
+
+      get: (token, id) =>
+        request(`/api/admin/video-scenarios/${id}`, {
+          method: "GET",
+          token,
+        }),
+
+      create: (token, payload) =>
+        request("/api/admin/video-scenarios", {
+          method: "POST",
+          token,
+          body: payload,
+        }),
+
+      update: (token, id, payload) =>
+        request(`/api/admin/video-scenarios/${id}`, {
+          method: "PUT",
+          token,
+          body: payload,
+        }),
+
+      delete: (token, id) =>
+        request(`/api/admin/video-scenarios/${id}`, {
+          method: "DELETE",
+          token,
+        }),
+    },
+  },
+
   // ===== PHOTO API =====
   photo: {
     // ✅ GENERATED (RIGHT BLOCK uchun)
@@ -250,14 +288,21 @@ export const api = {
       listItems: (token, subId) =>
         request(`/api/photo/models/subcategories/${subId}/items`, { method: "GET", token }),
 
+      // YANGI: create, update, delete to'liq
       createCategory: (token, payload) =>
         request("/api/admin/photo/models/categories", { method: "POST", token, body: payload }),
+
+      updateCategory: (token, id, payload) =>
+        request(`/api/admin/photo/models/categories/${id}`, { method: "PUT", token, body: payload }),
 
       deleteCategory: (token, id) =>
         request(`/api/admin/photo/models/categories/${id}`, { method: "DELETE", token }),
 
       createSubcategory: (token, categoryId, payload) =>
         request(`/api/admin/photo/models/categories/${categoryId}/subcategories`, { method: "POST", token, body: payload }),
+
+      updateSubcategory: (token, id, payload) =>
+        request(`/api/admin/photo/models/subcategories/${id}`, { method: "PUT", token, body: payload }),
 
       deleteSubcategory: (token, id) =>
         request(`/api/admin/photo/models/subcategories/${id}`, { method: "DELETE", token }),
