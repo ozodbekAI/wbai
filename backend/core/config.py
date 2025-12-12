@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "postgres"
 
     MEDIA_ROOT: str = "media"
-    PUBLIC_BASE_URL: str = "https://8dnfnh7m-8000.euw.devtunnels.ms"
+    PUBLIC_BASE_URL: str = "http://127.0.0.1:8000/"
 
     DATABASE_URL: Optional[str] = None
 

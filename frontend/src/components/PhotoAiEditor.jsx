@@ -12,7 +12,6 @@ const TABS = [
   { key: "video", label: "Создать видео" },
 ];
 
-// Video planlar statik (frontend)
 const VIDEO_PLANS = [
   {
     key: "balance",
@@ -1009,17 +1008,22 @@ export default function PhotoStudio({
                           (normalizeMode === "new" && normalizePhotos.length < 1)) && (
                           <button
                             onClick={() => {
-                              const activeItem = cardPhotos[selectedCardIndex];
-                              if (!activeItem) {
-                                alert("Сначала выберите фото слева");
+                              // ❗ Используем именно ТО, что сейчас в центре
+                              if (!activeCardUrl) {
+                                alert("Сначала выберите или загрузите фото (по центру)");
                                 return;
                               }
+
+                              // Пытаемся взять объект из карточек, а если вдруг нет — берем просто URL
+                              const activeItem =
+                                cardPhotos[selectedCardIndex] || { url: activeCardUrl };
+
                               handleAddNormalizePhoto(activeItem);
                             }}
                             className="w-full px-3 py-2 rounded-lg border-2 border-dashed border-indigo-300 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400 transition flex items-center justify-center gap-2 text-sm"
                           >
                             <Plus className="w-4 h-4" />
-                            Добавить из выбранных
+                            Добавить текущее фото
                           </button>
                         )}
                       </div>
