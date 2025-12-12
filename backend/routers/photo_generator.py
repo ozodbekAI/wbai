@@ -1,3 +1,5 @@
+# backend/api/photo.py (yoki sizdagi router fayl nomi)
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Request
 from pydantic import BaseModel
 from typing import Optional, List, Literal
@@ -9,6 +11,7 @@ from pathlib import Path
 from core.database import get_db_dependency
 from core.dependencies import get_current_user
 from repositories.scence_repositories import SceneCategoryRepository, PoseRepository
+from repositories.model_repository import ModelRepository 
 from services.kie_service.kie_services import kie_service
 from sqlalchemy.orm import Session
 
@@ -20,7 +23,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/photo", tags=["Photo Generation"])
 
 
-# ===== SCHEMAS =====
 
 class SceneGenerateRequest(BaseModel):
     photo_url: str
@@ -40,7 +42,7 @@ class CustomGenerateRequest(BaseModel):
 
 class EnhancePhotoRequest(BaseModel):
     photo_url: str
-    level: str = "medium"  # light, medium, strong
+    level: str = "medium" 
 
 
 class VideoGenerateRequest(BaseModel):
@@ -52,11 +54,22 @@ class VideoGenerateRequest(BaseModel):
     model: str = "grok-imagine/image-to-video"
     translate_to_en: bool = True
 
+class NormalizeGenerateRequest(BaseModel):
+    mode: Literal["own_model", "new_model"]  
+
+    # own_model
+    photo_url_1: Optional[str] = None
+    photo_url_2: Optional[str] = None
+
+    # new_model
+    photo_url: Optional[str] = None
+    model_item_id: Optional[int] = None
+
 
 class PhotoGenerationResponse(BaseModel):
     image_base64: str
-    file_name: Optional[str] = None   # relative path: photos/xxx.png
-    file_url: Optional[str] = None    # full URL: https://.../media/photos/xxx.png
+    file_name: Optional[str] = None   
+    file_url: Optional[str] = None    
 
 
 class VideoGenerationResponse(BaseModel):
@@ -78,6 +91,23 @@ class GeneratedListResponse(BaseModel):
     offset: int
     total: int
     has_more: bool
+
+
+# 🔹 MODEL DICTIONARY SCHEMAS (NORMALIZE uchun)
+class ModelCategoryOut(BaseModel):
+    id: int
+    name: str
+
+
+class ModelSubcategoryOut(BaseModel):
+    id: int
+    name: str
+
+
+class ModelItemOut(BaseModel):
+    id: int
+    name: str
+    prompt: Optional[str] = None
 
 
 # ===== HELPERS =====
@@ -325,4 +355,119 @@ async def generate_video(
 
     except Exception as e:
         logger.error(f"Video generation error: {e}")
+        raise HTTPException(500, str(e))
+
+
+# ===== NORMALIZE MODELS DICTIONARY (categories / subcategories / items) =====
+
+@router.get("/models/categories", response_model=List[ModelCategoryOut])
+async def list_model_categories(
+    db: Session = Depends(get_db_dependency),
+    user: dict = Depends(get_current_user),
+):
+    repo = ModelRepository(db)
+    cats = repo.list_categories()
+    return [ModelCategoryOut(id=c.id, name=c.name) for c in cats]
+
+
+@router.get("/models/subcategories", response_model=List[ModelSubcategoryOut])
+async def list_model_subcategories(
+    category_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db_dependency),
+    user: dict = Depends(get_current_user),
+):
+    repo = ModelRepository(db)
+    subs = repo.list_subcategories_by_category(category_id)
+    return [ModelSubcategoryOut(id=s.id, name=s.name) for s in subs]
+
+
+@router.get("/models/items", response_model=List[ModelItemOut])
+async def list_model_items(
+    subcategory_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db_dependency),
+    user: dict = Depends(get_current_user),
+):
+    repo = ModelRepository(db)
+    items = repo.list_items_by_subcategory(subcategory_id)
+    return [
+        ModelItemOut(
+            id=i.id,
+            name=getattr(i, "name", ""),
+            prompt=getattr(i, "prompt", None),
+        )
+        for i in items
+    ]
+
+
+# ===== NORMALIZE GENERATION (OWN / NEW MODEL) =====
+
+@router.post("/generate/normalize", response_model=PhotoGenerationResponse)
+async def generate_normalize(
+    request: NormalizeGenerateRequest,
+    db: Session = Depends(get_db_dependency),
+    user: dict = Depends(get_current_user),
+):
+    """
+    mode = "own_model":
+        - photo_url_1: item
+        - photo_url_2: model
+
+    mode = "new_model":
+        - photo_url: item
+        - model_item_id: tipaj ID (DB dan prompt olib ishlatiladi)
+    """
+    try:
+        if request.mode == "own_model":
+            if not request.photo_url_1 or not request.photo_url_2:
+                raise HTTPException(
+                    400,
+                    "photo_url_1 and photo_url_2 are required for mode=own_model",
+                )
+
+            result = await kie_service.normalize_own_model(
+                item_image_url=request.photo_url_1,
+                model_image_url=request.photo_url_2,
+            )
+
+        elif request.mode == "new_model":
+            if not request.photo_url or not request.model_item_id:
+                raise HTTPException(
+                    400,
+                    "photo_url and model_item_id are required for mode=new_model",
+                )
+
+            repo = ModelRepository(db)
+            item = repo.get_item(request.model_item_id)
+            if not item:
+                raise HTTPException(404, "Model item (tipaj) not found")
+
+            model_prompt = getattr(item, "prompt", None)
+            if not model_prompt:
+                raise HTTPException(
+                    400,
+                    "Selected model item does not have prompt description",
+                )
+
+            result = await kie_service.normalize_new_model(
+                item_image_url=request.photo_url,
+                model_prompt=model_prompt,
+            )
+
+        else:
+            raise HTTPException(400, "Unknown mode, must be 'own_model' or 'new_model'")
+
+        image_bytes = result["image"]
+        rel_path = save_generated_file(image_bytes, kind="image")
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        return PhotoGenerationResponse(
+            image_base64=image_base64,
+            file_name=rel_path,
+            file_url=get_file_url(rel_path),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Normalize generation error: {e}")
         raise HTTPException(500, str(e))

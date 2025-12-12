@@ -1,15 +1,18 @@
 # backend/routers/photo_models.py
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from typing import List
+
+from sqlalchemy.orm import Session
 
 from core.database import get_db_dependency
+from core.dependencies import get_current_user
 from repositories.model_repository import ModelRepository
 
 router = APIRouter(
     prefix="/api/photo/models",
-    tags=["Photo - Models (normalize)"],
+    tags=["Photo Models"]
 )
 
 
@@ -29,22 +32,70 @@ class ModelItemCreate(BaseModel):
     order_index: int = 0
 
 
-@router.get("/categories")
-def list_categories(db: Session = Depends(get_db_dependency)):
+
+# ===== RESPONSE SCHEMAS =====
+
+class ModelCategoryOut(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        orm_mode = True
+
+
+class ModelSubcategoryOut(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        orm_mode = True
+
+
+class ModelItemOut(BaseModel):
+    id: int
+    name: str
+    prompt: str
+
+    class Config:
+        orm_mode = True
+
+
+# ===== CATEGORIES =====
+
+@router.get("/categories", response_model=List[ModelCategoryOut])
+async def list_model_categories(
+    db: Session = Depends(get_db_dependency),
+    user: dict = Depends(get_current_user),
+):
     repo = ModelRepository(db)
-    return repo.get_all_categories()
+    cats = repo.list_categories()
+    return cats
 
 
-@router.get("/categories/{category_id}/subcategories")
-def list_subcategories(category_id: int, db: Session = Depends(get_db_dependency)):
+# ===== SUBCATEGORIES =====
+
+@router.get("/subcategories", response_model=List[ModelSubcategoryOut])
+async def list_model_subcategories(
+    category_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db_dependency),
+    user: dict = Depends(get_current_user),
+):
     repo = ModelRepository(db)
-    return repo.get_subcategories_by_category(category_id)
+    subs = repo.list_subcategories_by_category(category_id)
+    return subs
 
 
-@router.get("/subcategories/{sub_id}/items")
-def list_items(sub_id: int, db: Session = Depends(get_db_dependency)):
+# ===== ITEMS (TIPAJI) =====
+
+@router.get("/items", response_model=List[ModelItemOut])
+async def list_model_items(
+    subcategory_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db_dependency),
+    user: dict = Depends(get_current_user),
+):
     repo = ModelRepository(db)
-    return repo.get_items_by_subcategory(sub_id)
+    items = repo.list_items_by_subcategory(subcategory_id)
+    return items
 
 
 # ===== ADMIN CRUD =====
