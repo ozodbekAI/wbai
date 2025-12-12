@@ -35,6 +35,7 @@ jobs:
             --exclude '.env' \
             --exclude 'venv/' \
             --exclude 'backend/.env' \
+            --exclude 'backend/media' \
             --exclude 'frontend/.env' \
             ./ ${{ env.USER }}@${{ env.SERVER_IP }}:${{ env.SERVER_DIR }}
 

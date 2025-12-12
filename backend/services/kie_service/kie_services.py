@@ -5,11 +5,12 @@ import asyncio
 import requests
 import json
 import logging
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 
 from core.config import settings
 from core.database import SessionLocal
 from repositories.scence_repositories import SceneCategoryRepository
+from repositories.promt_repository import PromptRepository
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class KIEService:
             "Authorization": f"Bearer {self.api_key}",
         }
 
-    # ===== DEFAULT PROMPTS (endilikda faqat shular ishlatiladi) =====
+    # ===== DEFAULT PROMPTS (fallback uchun) =====
 
     DEFAULT_GHOST_PROMPT = (
         "Create a ghost mannequin from the reference image: transparent body, "
@@ -44,12 +45,47 @@ class KIEService:
         "Match pose, lighting, and style perfectly. Maintain product details, natural lighting, high quality, photorealistic."
     )
 
-    async def _get_normalize_prompts(self) -> Tuple[str, str]:
+    DEFAULT_NEW_MODEL_PROMPT = (
+        "Professional product normalization: Take the ghost mannequin from the reference image "
+        "and place it on a new model. High quality, photorealistic, studio lighting, natural pose."
+    )
+
+    async def _get_normalize_prompts(self, db: Optional[SessionLocal] = None) -> Tuple[str, str, str]:
         """
-        Oldin bu yerda DB dan o‘qilardi (BotMessageRepository).
-        Endi esa oddiygina default constantlardan foydalanamiz.
+        Normalize uchun 3 ta prompt:
+        1. normalize_ghost - ghost mannequin yaratish uchun
+        2. normalize_own_combine - ghost + o'z modelni birlashtirish
+        3. normalize_new_model - ghost + yangi model (DB dan)
+        
+        Agar DB dan topilmasa - default promptlarni qaytaradi
         """
-        return self.DEFAULT_GHOST_PROMPT, self.DEFAULT_OWN_COMBINE_PROMPT
+        ghost_prompt = self.DEFAULT_GHOST_PROMPT
+        own_combine_prompt = self.DEFAULT_OWN_COMBINE_PROMPT
+        new_model_prompt = self.DEFAULT_NEW_MODEL_PROMPT
+
+        if db:
+            try:
+                repo = PromptRepository(db)
+                
+                # normalize_ghost
+                ghost_p = repo.get_active_prompt("normalize_ghost")
+                if ghost_p and ghost_p.system_prompt:
+                    ghost_prompt = ghost_p.system_prompt
+                
+                # normalize_own_combine
+                own_p = repo.get_active_prompt("normalize_own_combine")
+                if own_p and own_p.system_prompt:
+                    own_combine_prompt = own_p.system_prompt
+                
+                # normalize_new_model
+                new_p = repo.get_active_prompt("normalize_new_model")
+                if new_p and new_p.system_prompt:
+                    new_model_prompt = new_p.system_prompt
+                    
+            except Exception as e:
+                logger.warning(f"Failed to load normalize prompts from DB: {e}")
+
+        return ghost_prompt, own_combine_prompt, new_model_prompt
 
     # ===== KIE API LOW LEVEL =====
 
@@ -69,18 +105,15 @@ class KIEService:
 
         code = result.get("code")
 
-        # Kredits tugagan holat
         if code == 402:
             logger.error(f"KIE credits insufficient (402): {result}")
             raise KIEInsufficientCreditsError(result)
 
-        # Ruxsat (permission) xatolari
         msg = (result.get("msg") or "").lower()
         if code in (401, 403) or "access" in msg or "permission" in msg:
             logger.error(f"KIE access error: {result}")
             raise PermissionError(result.get("msg", "KIE access denied"))
 
-        # Boshqa xatolar
         if code != 200:
             logger.error(f"API create task error: {result}")
             raise ValueError(f"Failed to create task: {result.get('msg', 'Unknown error')}")
@@ -170,15 +203,9 @@ class KIEService:
             logger.error(f"Failed to download from {url}: {e}")
             raise
 
-    # ===== PRODUCT CARD SCENES (SceneCategoryRepository SYNC) =====
+    # ===== PRODUCT CARD SCENES =====
 
     async def generate_product_cards(self, data: dict) -> List[dict]:
-        """
-        data:
-          - photo_url: str
-          - generation_type: "all_scenes" | "group_scenes" | "single_scene"
-          - selected_group / selected_item (agar kerak bo'lsa)
-        """
         photo_url = data["photo_url"]
         results: List[dict] = []
         model = "google/nano-banana-edit"
@@ -311,96 +338,121 @@ class KIEService:
 
         return results
 
-    # ===== NORMALIZE / OWN MODEL =====
+    # ===== NORMALIZE / OWN MODEL (DB prompts bilan) =====
 
-    async def normalize_own_model(self, item_image_url: str, model_image_url: str) -> dict:
+    async def normalize_own_model(
+        self, 
+        item_image_url: str, 
+        model_image_url: str,
+        ghost_prompt_override: Optional[str] = None,
+        combine_prompt_override: Optional[str] = None
+    ) -> dict:
+        model = "google/nano-banana-edit"
+        
+        db = SessionLocal()
+        try:
+            ghost_prompt, own_combine_prompt, _ = await self._get_normalize_prompts(db)
+            
+            # Override lar bor bo'lsa ularni ishlatamiz
+            if ghost_prompt_override:
+                ghost_prompt = ghost_prompt_override
+            if combine_prompt_override:
+                own_combine_prompt = combine_prompt_override
+
+            # 1-qadam: itemdan ghost / maneken
+            input_data_ghost = {
+                "prompt": ghost_prompt,
+                "image_urls": [item_image_url],
+                "output_format": "png",
+                "image_size": "3:4",
+            }
+            task_id_ghost = await asyncio.to_thread(
+                self.create_task, model, input_data_ghost
+            )
+            ghost_result = await self.poll_task(task_id_ghost)
+            if "resultUrls" not in ghost_result or not ghost_result["resultUrls"]:
+                raise ValueError("No ghost image in result")
+            ghost_url = ghost_result["resultUrls"][0]
+
+            # 2-qadam: ghost + model photo
+            input_data_combine = {
+                "prompt": own_combine_prompt,
+                "image_urls": [ghost_url, model_image_url],
+                "output_format": "png",
+                "image_size": "3:4",
+            }
+            task_id_combine = await asyncio.to_thread(
+                self.create_task, model, input_data_combine
+            )
+            combine_result = await self.poll_task(task_id_combine)
+            if "resultUrls" in combine_result and combine_result["resultUrls"]:
+                return {"image": await self.download_image(combine_result["resultUrls"][0])}
+            raise ValueError("No final image in result")
+        finally:
+            db.close()
+
+    async def normalize_new_model(
+        self, 
+        item_image_url: str, 
+        model_prompt: str,
+        ghost_prompt_override: Optional[str] = None,
+        new_model_prompt_override: Optional[str] = None
+    ) -> dict:
         model = "google/nano-banana-edit"
 
-        ghost_prompt, own_combine_prompt = await self._get_normalize_prompts()
+        db = SessionLocal()
+        try:
+            ghost_prompt, _, new_model_base_prompt = await self._get_normalize_prompts(db)
+            
+            # Override lar
+            if ghost_prompt_override:
+                ghost_prompt = ghost_prompt_override
 
-        # 1-qadam: itemdan ghost / maneken
-        input_data_ghost = {
-            "prompt": ghost_prompt,
-            "image_urls": [item_image_url],
-            "output_format": "png",
-            "image_size": "3:4",
-        }
-        task_id_ghost = await asyncio.to_thread(
-            self.create_task, model, input_data_ghost
-        )
-        ghost_result = await self.poll_task(task_id_ghost)
-        if "resultUrls" not in ghost_result or not ghost_result["resultUrls"]:
-            raise ValueError("No ghost image in result")
-        ghost_url = ghost_result["resultUrls"][0]
+            # 1-qadam: itemdan ghost / maneken
+            input_data_ghost = {
+                "prompt": ghost_prompt,
+                "image_urls": [item_image_url],
+                "output_format": "png",
+                "image_size": "3:4",
+            }
+            task_id_ghost = await asyncio.to_thread(
+                self.create_task, model, input_data_ghost
+            )
+            ghost_result = await self.poll_task(task_id_ghost)
+            if "resultUrls" not in ghost_result or not ghost_result["resultUrls"]:
+                raise ValueError("No ghost image in result")
+            ghost_url = ghost_result["resultUrls"][0]
 
-        # 2-qadam: ghost + model photo (own_combine_prompt)
-        input_data_combine = {
-            "prompt": own_combine_prompt,
-            "image_urls": [ghost_url, model_image_url],
-            "output_format": "png",
-            "image_size": "3:4",
-        }
-        task_id_combine = await asyncio.to_thread(
-            self.create_task, model, input_data_combine
-        )
-        combine_result = await self.poll_task(task_id_combine)
-        if "resultUrls" in combine_result and combine_result["resultUrls"]:
-            return {"image": await self.download_image(combine_result["resultUrls"][0])}
-        raise ValueError("No final image in result")
-
-    async def normalize_new_model(self, item_image_url: str, model_prompt: str) -> dict:
-        model = "google/nano-banana-edit"
-
-        ghost_prompt, _ = await self._get_normalize_prompts()
-
-        # 1-qadam: itemdan ghost / maneken
-        input_data_ghost = {
-            "prompt": ghost_prompt,
-            "image_urls": [item_image_url],
-            "output_format": "png",
-            "image_size": "3:4",
-        }
-        task_id_ghost = await asyncio.to_thread(
-            self.create_task, model, input_data_ghost
-        )
-        ghost_result = await self.poll_task(task_id_ghost)
-        if "resultUrls" not in ghost_result or not ghost_result["resultUrls"]:
-            raise ValueError("No ghost image in result")
-        ghost_url = ghost_result["resultUrls"][0]
-
-        # 2-qadam: yangi fotomodelni AI bilan generatsiya qilish
-        combine_prompt = (
-            "Professional product normalization: Take the ghost mannequin from the reference image "
-            "and place it on a new model described as: "
-            f"{model_prompt}. High quality, photorealistic, studio lighting, natural pose."
-        )
-        input_data_combine = {
-            "prompt": combine_prompt,
-            "image_urls": [ghost_url],
-            "output_format": "png",
-            "image_size": "3:4",
-        }
-        task_id_combine = await asyncio.to_thread(
-            self.create_task, model, input_data_combine
-        )
-        combine_result = await self.poll_task(task_id_combine)
-        if "resultUrls" in combine_result and combine_result["resultUrls"]:
-            return {"image": await self.download_image(combine_result["resultUrls"][0])}
-        raise ValueError("No final image in result")
+            # 2-qadam: yangi fotomodelni AI bilan generatsiya qilish
+            if new_model_prompt_override:
+                combine_prompt = new_model_prompt_override
+            else:
+                combine_prompt = (
+                    f"{new_model_base_prompt} "
+                    f"Model details: {model_prompt}"
+                )
+                
+            input_data_combine = {
+                "prompt": combine_prompt,
+                "image_urls": [ghost_url],
+                "output_format": "png",
+                "image_size": "3:4",
+            }
+            task_id_combine = await asyncio.to_thread(
+                self.create_task, model, input_data_combine
+            )
+            combine_result = await self.poll_task(task_id_combine)
+            if "resultUrls" in combine_result and combine_result["resultUrls"]:
+                return {"image": await self.download_image(combine_result["resultUrls"][0])}
+            raise ValueError("No final image in result")
+        finally:
+            db.close()
 
     # ===== VIDEO / SIMPLE EDITS =====
 
     async def enhance_photo(self, photo_url: str, level: str = "medium") -> dict:
-        """
-        Улучшение качества фото: резкость, освещение, цвета, удаление шума
-        
-        Args:
-            photo_url: URL исходного фото
-            level: "light", "medium", "strong"
-        """
         model = "google/nano-banana-edit"
         
-        # Промпт в зависимости от уровня
         prompts = {
             "light": (
                 "Light photo enhancement: slightly improve sharpness, "
@@ -423,7 +475,7 @@ class KIEService:
             "prompt": prompt,
             "image_urls": [photo_url],
             "output_format": "png",
-            "image_size": "original",  # сохраняем оригинальный размер
+            "image_size": "original",
         }
         
         task_id = await asyncio.to_thread(self.create_task, model, input_data)

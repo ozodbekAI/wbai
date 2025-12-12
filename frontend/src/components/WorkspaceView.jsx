@@ -1,7 +1,3 @@
-// ============================================
-// FILE: src/components/WorkspaceView.jsx
-// ============================================
-
 import {
   useState,
   useMemo,
@@ -27,16 +23,16 @@ import PhotoStudio from "./PhotoAiEditor";
 import PhotoTemplatesPanel from "./PhotoTemplatesPanel";
 import PhotosGrid from "./PhotosGrid";
 import { syncWbMedia } from "../api/wbMediaApi";
-import { updateWbCards } from "../api/wbCardsApi";
+import {
+  updateWbCards,
+  updateCardDimensions,   
+} from "../api/wbCardsApi"; 
 
-import { message } from "antd";
+import { message } from "antd"; 
 
 import { api } from "../api/client";
 
 export default function WorkspaceView({ token, username, onLogout }) {
-  // Qaysi sahifa: asosiy ("main") yoki Raski page ("raski")
-  const [activeView, setActiveView] = useState("main");
-
   const [cardPhotos, setCardPhotos] = useState([]);
   const [article, setArticle] = useState("");
   const [error, setError] = useState("");
@@ -56,16 +52,66 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const [finalDescription, setFinalDescription] = useState("");
   const [finalCharValues, setFinalCharValues] = useState({});
 
+  // NEW: dimensions / sizes editable in UI
+  const [dimensions, setDimensions] = useState({
+    length: card?.dimensions?.length || "",
+    width: card?.dimensions?.width || "",
+    height: card?.dimensions?.height || "",
+  });
+  const [sizes, setSizes] = useState(card?.sizes || []);
+
+  // DIMENSIONS UPDATE STATE
+  const [processingDimensions, setProcessingDimensions] = useState(false);
+  const handleUpdateDimensions = async () => {
+    if (!card?.nmID) {
+      message.warning("Карточка не загружена");
+      return;
+    }
+
+    const { length, width, height, weightBrutto } = dimensions;
+
+    if (!length || !width || !height) {
+      message.warning("Заполните хотя бы длину, ширину и высоту");
+      return;
+    }
+
+    setProcessingDimensions(true);
+
+    try {
+      await updateCardDimensions(token, card.nmID, {
+        length: Number(length),
+        width: Number(width),
+        height: Number(height),
+        weightBrutto: weightBrutto ? Number(weightBrutto) : 0,
+      });
+
+      message.success("Габариты и вес успешно обновлены в Wildberries!");
+      pushLog("Габариты и вес обновлены в WB");
+    } catch (err) {
+      console.error(err);
+      message.error("Ошибка: " + (err.message || "Неизвестная ошибка"));
+      pushLog(`Ошибка обновления габаритов: ${err.message}`);
+    } finally {
+      setProcessingDimensions(false);
+    }
+  };
   // HISTORY
   const [historyItems, setHistoryItems] = useState([]);
   const [historyStats, setHistoryStats] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
+  const handleOpenPhotoStudio = () => setPhotoStudioOpen(true);
+  const handleClosePhotoStudio = () => setPhotoStudioOpen(false);
+
+  const handleUpdateCardPhotos = (newPhotos) => {
+    setCardPhotos(newPhotos);
+  };
+
   // PROMPTS / PHOTO TEMPLATES
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [photoTemplatesOpen, setPhotoTemplatesOpen] = useState(false);
 
-  // PHOTO STUDIO (AI modal – WB kartochka uchun)
+  // PHOTO STUDIO (AI modal)
   const [photoStudioOpen, setPhotoStudioOpen] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -109,7 +155,34 @@ export default function WorkspaceView({ token, username, onLogout }) {
 
       setCard(data.card);
       setCurrentValidation(data.response || null);
-      setCardVideo(data.card.video || null);
+
+      // ✅ VIDEO CHECK
+      const hasVideo = Boolean(data.card.video);
+      setCardVideo(hasVideo ? data.card.video : null);
+
+      if (!hasVideo) {
+        pushLog("⚠️ В карточке нет видео");
+        
+        // ValidationIssuesPanel uchun media_issues qo'shamiz
+        setCurrentValidation((prev) => {
+          const existing = prev || {};
+          const existingMessages = existing.messages || [];
+          const mediaIssues = existing.media_issues || [];
+
+          return {
+            ...existing,
+            messages: [
+              ...existingMessages,
+              {
+                level: "warning",
+                field: "video",
+                message: "В карточке отсутствует видео",
+              }
+            ],
+            media_issues: [...mediaIssues, "no_video"],
+          };
+        });
+      }
 
       const photosFromCard = (data.card?.photos || [])
         .map((p) => ({
@@ -120,6 +193,14 @@ export default function WorkspaceView({ token, username, onLogout }) {
         .filter((p) => p.url);
 
       setCardPhotos(photosFromCard);
+
+      setDimensions({
+        length: data.card.dimensions?.length ?? "",
+        width: data.card.dimensions?.width ?? "",
+        height: data.card.dimensions?.height ?? "",
+        weightBrutto: data.card.dimensions?.weightBrutto ?? "", // 0 bo‘lsa ham saqlaydi
+      });
+      setSizes(data.card.sizes || []);
 
       pushLog("Текущая карточка WB получена");
     } catch (e) {
@@ -139,7 +220,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
     try {
       pushLog("🔄 Сохранение порядка фото в WB...");
 
-      // WBdagi eski rasmlar (isNew=false) tartibi bo‘yicha faqat URL + order
       const photosOrder = updatedPhotos
         .filter((p) => !p.isNew && p.url)
         .map((p, index) => ({
@@ -197,6 +277,11 @@ export default function WorkspaceView({ token, username, onLogout }) {
     try {
       const art = article.trim();
       pushLog("Запуск AI обработки…");
+
+      // Проверка: если для этого run'а нужно видео в карточке, но видео отсутствует -> предупреждение
+      if (!cardVideo) {
+        pushLog("❗ В карточке нет видео — некоторые операции могут быть невозможны");
+      }
 
       const res = await api.process({ article: art }, token);
       const contentType = res.headers.get("content-type") || "";
@@ -341,7 +426,9 @@ export default function WorkspaceView({ token, username, onLogout }) {
       const base = fromNew || fromOld;
 
       let rawVal =
-        name in finalCharValues ? finalCharValues[name] : base?.value ?? [];
+        name in finalCharValues
+          ? finalCharValues[name]
+          : base?.value ?? [];
 
       const arr = Array.isArray(rawVal)
         ? rawVal
@@ -359,6 +446,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
 
     return {
       nmID: card.nmID,
+      vendorCode: card.vendorCode,
       brand: card.brand,
       subjectID: card.subjectID,
       subjectName: card.subjectName,
@@ -366,8 +454,15 @@ export default function WorkspaceView({ token, username, onLogout }) {
       description: (finalDescription || "").trim(),
       characteristics: finalChars,
       validation_score: result.validation_score,
+      // include dimensions and sizes edits
+      dimensions: {
+        length: dimensions.length || "",
+        width: dimensions.width || "",
+        height: dimensions.height || "",
+      },
+      sizes: sizes,
     };
-  }, [card, result, finalTitle, finalDescription, finalCharValues]);
+  }, [card, result, finalTitle, finalDescription, finalCharValues, dimensions, sizes]);
 
   async function handleSendToWB() {
     try {
@@ -380,13 +475,13 @@ export default function WorkspaceView({ token, username, onLogout }) {
       await updateWbCards(token, [
         {
           nmID: finalData.nmID,
-          vendorCode: card.vendorCode,
+          vendorCode: finalData.vendorCode,
           brand: finalData.brand,
           title: finalData.title,
           description: finalData.description,
-          dimensions: card.dimensions,
+          dimensions: finalData.dimensions,
           characteristics: finalData.characteristics,
-          sizes: card.sizes,
+          sizes: finalData.sizes,
         },
       ]);
 
@@ -469,12 +564,16 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const handleClosePhotoTemplates = () => setPhotoTemplatesOpen(false);
 
   /** PhotosGrid uchun handlerlar */
+  const handleOpenUpload = () => {
+    fileInputRef.current?.click();
+  };
+
   const handleFilesChange = (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
     const newItems = files.map((f) => ({
-      photoId: null,
+      photoId: null,     // WBda hali yo‘q
       url: URL.createObjectURL(f),
       file: f,
       isNew: true,
@@ -485,71 +584,34 @@ export default function WorkspaceView({ token, username, onLogout }) {
     e.target.value = "";
   };
 
-  // HEADERDAGI RASKI – yangi PAGE
-  const handleOpenRaskiPage = () => {
-    setActiveView("raski");
+
+  const handleReorderPhotos = (newOrder) => {
+    setCardPhotos(newOrder);
   };
 
-  const handleCloseRaskiPage = () => {
-    setActiveView("main");
+  const handleSavePhotosOrder = (newOrder) => {
+    console.log("Save photo order:", newOrder);
   };
 
-  const handleUpdateCardPhotos = (newPhotos) => {
-    setCardPhotos(newPhotos);
-  };
+  // Global: click outside handler to signal dropdowns/dictionaries to close
+  useEffect(() => {
+    const onDocClick = (e) => {
+      // dispatch custom event — components like CompareCharacteristics should listen
+      window.dispatchEvent(new CustomEvent("close-dictionary", { detail: {} }));
+    };
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, []);
 
-  // ---- RASKI PAGE BRANCH ----
-  if (activeView === "raski") {
-    return (
-      <div className="min-h-screen bg-gray-100">
-        <HeaderBar
-          username={username}
-          onLogout={onLogout}
-          onOpenPrompts={handleOpenPrompts}
-          onOpenPhotoSettings={handleOpenPhotoTemplates}
-          // Raski sahifasida RASKI tugmasi ko‘rinmasin – undefined
-          onOpenPhotoStudio={undefined}
-          onDownloadExcel={handleDownloadExcel}
-        />
-
-        <main className="max-w-[1800px] mx-auto px-6 py-6">
-          {/* Yangi RASKI sahifasi – faqat AI studiýa, kartochka chap panelisiz */}
-          <PhotoStudio
-            token={token}
-            cardPhotos={cardPhotos}
-            onUpdateCardPhotos={handleUpdateCardPhotos}
-            onClose={handleCloseRaskiPage}
-            mode="page"
-            showCardColumn={false}
-          />
-        </main>
-
-        {/* PROMPTS & TEMPLATES ham ishlayversin */}
-        <PromptsPanel
-          open={promptsOpen}
-          onClose={handleClosePrompts}
-          token={token}
-        />
-        <PhotoTemplatesPanel
-          open={photoTemplatesOpen}
-          onClose={handleClosePhotoTemplates}
-          token={token}
-        />
-      </div>
-    );
-  }
-
-  // ---- ASOSIY (WB KARTOCHKA) BRANCH ----
   return (
     <div className="min-h-screen bg-gray-100">
       <HeaderBar
         username={username}
         onLogout={onLogout}
-        onOpenPrompts={handleOpenPrompts}
-        onOpenPhotoSettings={handleOpenPhotoTemplates}
-        // Bu yerda RASKI tugmasi yangi page’ni ochadi
-        onOpenPhotoStudio={handleOpenRaskiPage}
-        onDownloadExcel={handleDownloadExcel}
+        onOpenPrompts={() => setPromptsOpen(true)}
+        onOpenPhotoSettings={() => setPhotoTemplatesOpen(true)}
+        onOpenPhotoStudio={handleOpenPhotoStudio} // NEW
+        onDownloadExcel={() => console.log("Download Excel")}
       />
 
       <main className="max-w-[1800px] mx-auto px-6 py-6">
@@ -579,11 +641,102 @@ export default function WorkspaceView({ token, username, onLogout }) {
               processingGenerate={processing}
             />
 
+            {card && (
+              <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-lg">
+                <h4 className="text-xl font-bold text-gray-800 mb-6 flex items-center gap-2">
+                  Габариты и вес товара
+                </h4>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Длина (см)
+                    </label>
+                    <input
+                      type="number"
+                      value={dimensions.length}
+                      onChange={(e) =>
+                        setDimensions((d) => ({ ...d, length: e.target.value }))
+                      }
+                      placeholder="29"
+                      className="w-full px-4 py-3 border rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-100 outline-none transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Ширина (см)
+                    </label>
+                    <input
+                      type="number"
+                      value={dimensions.width}
+                      onChange={(e) =>
+                        setDimensions((d) => ({ ...d, width: e.target.value }))
+                      }
+                      placeholder="35"
+                      className="w-full px-4 py-3 border rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-100 outline-none transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-600 mb-1">
+                      Высота (см)
+                    </label>
+                    <input
+                      type="number"
+                      value={dimensions.height}
+                      onChange={(e) =>
+                        setDimensions((d) => ({ ...d, height: e.target.value }))
+                      }
+                      placeholder="7"
+                      className="w-full px-4 py-3 border rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-100 outline-none transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-gray-600 mb-1">Вес брутто (кг)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={dimensions.weightBrutto ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDimensions(d => ({
+                          ...d,
+                          weightBrutto: val === "" ? "" : Number(val)
+                        }));
+                      }}
+                      placeholder="0.45"
+                      className="w-full px-4 py-2.5 border rounded-lg focus:border-red-500 focus:ring focus:ring-red-100 outline-none transition"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleUpdateDimensions}
+                  disabled={processingDimensions}
+                  className="w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-lg font-bold rounded-xl hover:from-emerald-700 hover:to-teal-700 transition shadow-xl disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+                >
+                  {processingDimensions ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                      Обновление габаритов...
+                    </>
+                  ) : (
+                    <>
+                      Обновить габариты и вес в Wildberries
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
             {/* PHOTOS GRID */}
             <PhotosGrid
               photos={cardPhotos}
               videoUrl={cardVideo}
-              onGenerate={() => setPhotoStudioOpen(true)} // WB kartochka uchun eski modal
+              onGenerate={() => setPhotoStudioOpen(true)}
               onReorder={(newOrder) => setCardPhotos(newOrder)}
               onSaveOrder={savePhotoOrderToWB}
             />
@@ -655,25 +808,27 @@ export default function WorkspaceView({ token, username, onLogout }) {
       {/* PROMPTS ADMIN PANEL */}
       <PromptsPanel
         open={promptsOpen}
-        onClose={handleClosePrompts}
+        onClose={() => setPromptsOpen(false)}
         token={token}
       />
 
       {/* PHOTO TEMPLATES ADMIN PANEL */}
       <PhotoTemplatesPanel
         open={photoTemplatesOpen}
-        onClose={handleClosePhotoTemplates}
+        onClose={() => setPhotoTemplatesOpen(false)}
         token={token}
       />
 
-      {/* PHOTO AI EDITOR MODAL – WB kartochka uchun eski variant */}
+      {/* PHOTO AI EDITOR MODAL */}
       {photoStudioOpen && (
         <PhotoStudio
           token={token}
           cardPhotos={cardPhotos}
           onUpdateCardPhotos={handleUpdateCardPhotos}
-          onClose={() => setPhotoStudioOpen(false)}
-          // bu yerda default: mode="modal", showCardColumn=true
+          onClose={handleClosePhotoStudio}
+          // PROPS: give card and cardVideo to studio so it can validate video / normalize logic
+          card={card}
+          cardVideo={cardVideo}
         />
       )}
     </div>

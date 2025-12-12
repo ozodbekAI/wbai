@@ -55,12 +55,18 @@ class PipelineService:
         color_limits = DataLoader.load_limits(color_only=True)
         other_limits = DataLoader.load_limits(color_only=False)
 
+        gender = self._extract_gender_from_card(card)
+        
+        fixed_fields, conditional_skip, conditional_fill, generate_fields = \
+                self.data_loader.filter_characteristics_by_type(charcs_meta_raw, subject_id, gender)
+
         validation_messages = validation_card(
             card,
             charcs_meta_raw,
             all_allowed_values,
             color_limits,
             other_limits,
+            conditional_skip
         )
         return {
             "status": "ok",

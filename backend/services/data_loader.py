@@ -189,7 +189,7 @@ class DataLoader:
     @staticmethod
     @lru_cache(maxsize=1)
     def load_generator_dict() -> Dict[str, List[str]]:
-        gen_dict_path = settings.DATA_DIR / "Справочник генерация.json"
+        gen_dict_path = settings.DATA_DIR / "Ключевые_слова.json"
         with gen_dict_path.open("r", encoding="utf-8") as f:
             return json.load(f)
 

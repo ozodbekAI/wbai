@@ -82,3 +82,62 @@ class ModelRepository:
             )
             .first()
         )
+    def add_category(self, name: str, order_index: int = 0):
+        cat = ModelCategory(name=name, order_index=order_index)
+        self.db.add(cat)
+        self.db.commit()
+        self.db.refresh(cat)
+        return cat
+
+    def update_category(self, category_id: int, name: str, order_index: int):
+        cat = self.db.query(ModelCategory).filter(ModelCategory.id == category_id).first()
+        if not cat:
+            return None
+        cat.name = name
+        cat.order_index = order_index
+        self.db.commit()
+        self.db.refresh(cat)
+        return cat
+
+    def delete_category(self, category_id: int):
+        self.db.query(ModelItem).filter(ModelItem.subcategory.has(category_id=category_id)).delete()
+        self.db.query(ModelSubcategory).filter(ModelSubcategory.category_id == category_id).delete()
+        self.db.query(ModelCategory).filter(ModelCategory.id == category_id).delete()
+        self.db.commit()
+
+    # === SUBCATEGORY ===
+    def add_subcategory(self, category_id: int, name: str, order_index: int = 0):
+        sub = ModelSubcategory(category_id=category_id, name=name, order_index=order_index)
+        self.db.add(sub)
+        self.db.commit()
+        self.db.refresh(sub)
+        return sub
+
+    def update_subcategory(self, sub_id: int, name: str, order_index: int):
+        sub = self.db.query(ModelSubcategory).filter(ModelSubcategory.id == sub_id).first()
+        if not sub:
+            return None
+        sub.name = name
+        sub.order_index = order_index
+        self.db.commit()
+        self.db.refresh(sub)
+        return sub
+
+    # === ITEM ===
+    def add_item(self, subcategory_id: int, name: str, prompt: str, order_index: int = 0):
+        item = ModelItem(subcategory_id=subcategory_id, name=name, prompt=prompt, order_index=order_index)
+        self.db.add(item)
+        self.db.commit()
+        self.db.refresh(item)
+        return item
+
+    def update_item(self, item_id: int, name: str, prompt: str, order_index: int):
+        item = self.db.query(ModelItem).filter(ModelItem.id == item_id).first()
+        if not item:
+            return None
+        item.name = name
+        item.prompt = prompt
+        item.order_index = order_index
+        self.db.commit()
+        self.db.refresh(item)
+        return item

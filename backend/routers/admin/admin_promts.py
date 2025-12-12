@@ -294,6 +294,7 @@ async def get_available_prompt_types(
 ):
     return {
         "types": [
+            # WB Card Generation
             {
                 "type": "title_generator",
                 "description": "Генерация заголовков (title) для карточек",
@@ -348,6 +349,28 @@ async def get_available_prompt_types(
                 "type": "color_detector_names",
                 "description": "Определение цветов на фото",
                 "category": "color",
+            },
+            # Normalize (Photo AI)
+            {
+                "type": "normalize_ghost",
+                "description": "Создание ghost mannequin для нормализации",
+                "category": "normalize",
+            },
+            {
+                "type": "normalize_own_combine",
+                "description": "Объединение ghost + своя модель",
+                "category": "normalize",
+            },
+            {
+                "type": "normalize_new_model",
+                "description": "Генерация с новой моделью (AI)",
+                "category": "normalize",
+            },
+            # Video
+            {
+                "type": "video_default",
+                "description": "Базовый промпт для видео (если сценарий не выбран)",
+                "category": "video",
             },
         ]
     }
