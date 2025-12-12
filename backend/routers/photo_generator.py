@@ -1,340 +1,328 @@
-# backend/routers/photo_generator.py (FINAL – KIE bilan 100% mos)
-
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Request
+from pydantic import BaseModel
+from typing import Optional, List, Literal
 import base64
 import logging
-from typing import Optional
-from urllib.parse import urlparse, urljoin
 import os
+from pathlib import Path
 
-from fastapi import (
-    APIRouter, HTTPException, Depends, Request,
-    Response, UploadFile, File
-)
+from core.database import get_db_dependency
+from core.dependencies import get_current_user
+from repositories.scence_repositories import SceneCategoryRepository, PoseRepository
+from services.kie_service.kie_services import kie_service
 from sqlalchemy.orm import Session
 
 from core.config import settings
-from core.database import get_db_dependency
-from models.generator import ModelItem, SceneItem, PosePrompt
-from schemas.photo import (
-    NormalizeNewModelRequest, NormalizeOwnModelRequest,
-    SceneGenerateRequest, PoseGenerateRequest,
-    CustomGenerateRequest, EnhancePhotoRequest,
-    UploadPhotoResponse, VideoGenerateRequest,
-    PhotoGenerateResponse, VideoGenerateResponse,
-)
-from services.kie_service.kie_services import kie_service
-from services.kie_service.translator import translator_service
-from services.media_storage import (
-    save_generated_file, get_file_url,
-    delete_generated_file, get_public_file_url
-)
+from services.media_storage import save_generated_file, get_file_url, delete_generated_file
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/photo", tags=["Photo generate"])
+router = APIRouter(prefix="/api/photo", tags=["Photo Generation"])
 
 
+# ===== SCHEMAS =====
+
+class SceneGenerateRequest(BaseModel):
+    photo_url: str
+    item_id: int
 
 
-def _to_base64(raw: bytes) -> str:
-    return base64.b64encode(raw).decode("utf-8")
+class PoseGenerateRequest(BaseModel):
+    photo_url: str
+    prompt_id: int
 
 
-def normalize_photo_url(request: Request, photo_url: str) -> str:
+class CustomGenerateRequest(BaseModel):
+    photo_url: str
+    prompt: str
+    translate_to_en: bool = True
+
+
+class EnhancePhotoRequest(BaseModel):
+    photo_url: str
+    level: str = "medium"  # light, medium, strong
+
+
+class VideoGenerateRequest(BaseModel):
+    photo_url: str
+    prompt: str
+    plan_key: Optional[str] = None
+    duration: int = 5
+    resolution: str = "1280x720"
+    model: str = "grok-imagine/image-to-video"
+    translate_to_en: bool = True
+
+
+class PhotoGenerationResponse(BaseModel):
+    image_base64: str
+    file_name: Optional[str] = None   # relative path: photos/xxx.png
+    file_url: Optional[str] = None    # full URL: https://.../media/photos/xxx.png
+
+
+class VideoGenerationResponse(BaseModel):
+    video_base64: str
+    file_name: Optional[str] = None   # relative path: videos/xxx.mp4
+    file_url: Optional[str] = None    # full URL: https://.../media/videos/xxx.mp4
+
+
+class GeneratedItem(BaseModel):
+    file_name: str                    # relative path
+    file_url: str                     # full url
+    kind: Literal["image", "video"]
+    created_at: str                   # ISO string
+
+
+class GeneratedListResponse(BaseModel):
+    items: List[GeneratedItem]
+    limit: int
+    offset: int
+    total: int
+    has_more: bool
+
+
+# ===== HELPERS =====
+
+def _kind_from_rel_path(rel_path: str) -> str:
+    rel_path = (rel_path or "").lower()
+    if rel_path.startswith("videos/") or rel_path.endswith(".mp4"):
+        return "video"
+    return "image"
+
+
+def _scan_generated_files() -> List[dict]:
     """
-    KIE API uchun **faqat tashqi HTTP(S) URL** qaytaradi.
+    Scans:
+      <MEDIA_ROOT>/photos/*
+      <MEDIA_ROOT>/videos/*
+    Sorts by mtime DESC.
     """
+    media_root = Path(settings.MEDIA_ROOT)
+    photos_dir = media_root / "photos"
+    videos_dir = media_root / "videos"
 
-    if not photo_url:
-        raise HTTPException(status_code=400, detail="photo_url is required")
+    out = []
 
-    photo_url = str(photo_url).strip()
+    for base_dir, kind in [(photos_dir, "image"), (videos_dir, "video")]:
+        if not base_dir.exists():
+            continue
+        for p in base_dir.glob("*"):
+            if not p.is_file():
+                continue
+            # minimal filter
+            if kind == "image" and p.suffix.lower() not in [".png", ".jpg", ".jpeg", ".webp"]:
+                continue
+            if kind == "video" and p.suffix.lower() not in [".mp4", ".mov", ".webm"]:
+                continue
 
-    # 1) blob URL – QABUL QILINMAYDI
-    if photo_url.startswith("blob:"):
-        raise HTTPException(
-            status_code=400,
-            detail="blob: URL not supported. Upload the file first."
+            rel = p.relative_to(media_root).as_posix()  # "photos/xxx.png"
+            try:
+                mtime = p.stat().st_mtime
+            except Exception:
+                mtime = 0
+
+            out.append({"rel": rel, "kind": kind, "mtime": mtime})
+
+    out.sort(key=lambda x: x["mtime"], reverse=True)
+    return out
+
+
+# ===== GENERATED LIST (PAGINATION) =====
+@router.get("/generated", response_model=GeneratedListResponse)
+async def list_generated(
+    limit: int = Query(24, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Pagination for generated media.
+    Newest first.
+    """
+    items = _scan_generated_files()
+    total = len(items)
+    page = items[offset: offset + limit]
+
+    resp_items = []
+    for it in page:
+        rel = it["rel"]
+        resp_items.append(
+            GeneratedItem(
+                file_name=rel,
+                file_url=get_file_url(rel),
+                kind=it["kind"],
+                created_at="",  # optional; can be derived if you keep metadata in DB later
+            )
         )
 
-    # 2) http/https bo‘lsa → shu holicha ishlaydi
-    parsed = urlparse(photo_url)
-    if parsed.scheme in ("http", "https"):
-        return photo_url
-
-    # 3) /media/... bo‘lsa → PUBLIC URL yasaymiz
-    if photo_url.startswith("/media/"):
-        return f"{settings.PUBLIC_BASE_URL}{photo_url}"
-
-    # 4) media/<folder> variantlari
-    if photo_url.startswith("media/"):
-        return f"{settings.PUBLIC_BASE_URL}/{photo_url}"
-
-    # 5) boshqa relative pathlar
-    return urljoin(settings.PUBLIC_BASE_URL + "/", photo_url.lstrip("/"))
+    return GeneratedListResponse(
+        items=resp_items,
+        limit=limit,
+        offset=offset,
+        total=total,
+        has_more=(offset + limit) < total,
+    )
 
 
-# ----------------------
-# SCENE
-# ----------------------
+@router.delete("/generated")
+async def delete_generated(
+    file_name: str = Query(..., description="relative path: photos/xxx.png or videos/xxx.mp4"),
+    user: dict = Depends(get_current_user),
+):
+    ok = delete_generated_file(file_name)
+    return {"status": "deleted" if ok else "not_found", "file_name": file_name}
 
-@router.post("/generate/scene", response_model=PhotoGenerateResponse)
+
+# ===== SCENE GENERATION =====
+
+@router.post("/generate/scene", response_model=PhotoGenerationResponse)
 async def generate_scene(
-    body: SceneGenerateRequest,
-    request: Request,
+    request: SceneGenerateRequest,
     db: Session = Depends(get_db_dependency),
+    user: dict = Depends(get_current_user),
 ):
-    item = db.get(SceneItem, body.item_id)
-    if not item or not item.is_active:
-        raise HTTPException(status_code=404, detail="Scene item not found")
+    try:
+        scene_repo = SceneCategoryRepository(db)
 
-    image_url = normalize_photo_url(request, body.photo_url)
+        item = scene_repo.get_item(request.item_id)
+        if not item:
+            raise HTTPException(404, "Scene item not found")
 
-    result = await kie_service.change_scene(image_url, item.prompt)
+        sub = scene_repo.get_subcategory(item.subcategory_id)
+        cat = scene_repo.get_category(sub.category_id)
 
-    if "image" not in result:
-        raise HTTPException(status_code=500, detail="KIE did not return image")
+        full_prompt = (
+            "Create a professional product card: Place the product from the "
+            f"reference image into the scene: {cat.name} → {sub.name} → {item.name}. "
+            f"Details: {item.prompt}. High quality, photorealistic, studio lighting, clean background."
+        )
 
-    raw = result["image"]
-    file_name = save_generated_file(raw, kind="image")
+        result = await kie_service.change_scene(request.photo_url, full_prompt)
 
-    return PhotoGenerateResponse(
-        image_base64=_to_base64(raw),
-        file_name=file_name,
-        file_url=get_file_url(file_name)
-    )
+        image_bytes = result["image"]
+        rel_path = save_generated_file(image_bytes, kind="image")
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        return PhotoGenerationResponse(
+            image_base64=image_base64,
+            file_name=rel_path,
+            file_url=get_file_url(rel_path),
+        )
+
+    except Exception as e:
+        logger.error(f"Scene generation error: {e}")
+        raise HTTPException(500, str(e))
 
 
-# ----------------------
-# POSE
-# ----------------------
+# ===== POSE GENERATION =====
 
-@router.post("/generate/pose", response_model=PhotoGenerateResponse)
+@router.post("/generate/pose", response_model=PhotoGenerationResponse)
 async def generate_pose(
-    body: PoseGenerateRequest,
-    request: Request,
+    request: PoseGenerateRequest,
     db: Session = Depends(get_db_dependency),
+    user: dict = Depends(get_current_user),
 ):
-    prompt_obj = db.get(PosePrompt, body.prompt_id)
-    if not prompt_obj or not prompt_obj.is_active:
-        raise HTTPException(status_code=404, detail="Pose prompt not found")
+    try:
+        pose_repo = PoseRepository(db)
 
-    image_url = normalize_photo_url(request, body.photo_url)
+        pose_prompt = pose_repo.get_prompt(request.prompt_id)
+        if not pose_prompt:
+            raise HTTPException(404, "Pose prompt not found")
 
-    result = await kie_service.change_pose(image_url, prompt_obj.prompt)
+        result = await kie_service.change_pose(request.photo_url, pose_prompt.prompt)
 
-    if "image" not in result:
-        raise HTTPException(status_code=500, detail="KIE did not return image")
+        image_bytes = result["image"]
+        rel_path = save_generated_file(image_bytes, kind="image")
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
-    raw = result["image"]
-    file_name = save_generated_file(raw, kind="image")
+        return PhotoGenerationResponse(
+            image_base64=image_base64,
+            file_name=rel_path,
+            file_url=get_file_url(rel_path),
+        )
 
-    return PhotoGenerateResponse(
-        image_base64=_to_base64(raw),
-        file_name=file_name,
-        file_url=get_file_url(file_name)
-    )
+    except Exception as e:
+        logger.error(f"Pose generation error: {e}")
+        raise HTTPException(500, str(e))
 
 
-# ----------------------
-# CUSTOM
-# ----------------------
+# ===== CUSTOM PROMPT =====
 
-@router.post("/generate/custom", response_model=PhotoGenerateResponse)
+@router.post("/generate/custom", response_model=PhotoGenerationResponse)
 async def generate_custom(
-    body: CustomGenerateRequest,
-    request: Request,
+    request: CustomGenerateRequest,
+    user: dict = Depends(get_current_user),
 ):
-    prompt = body.prompt
+    try:
+        prompt = request.prompt
+        result = await kie_service.custom_generation(request.photo_url, prompt)
 
-    if body.translate_to_en:
-        try:
-            prompt = await translator_service.translate_ru_to_en(prompt)
-        except:
-            pass
+        image_bytes = result["image"]
+        rel_path = save_generated_file(image_bytes, kind="image")
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
-    image_url = normalize_photo_url(request, body.photo_url)
+        return PhotoGenerationResponse(
+            image_base64=image_base64,
+            file_name=rel_path,
+            file_url=get_file_url(rel_path),
+        )
 
-    result = await kie_service.custom_generation(image_url, prompt)
-
-    if "image" not in result:
-        raise HTTPException(status_code=500, detail="KIE did not return image")
-
-    raw = result["image"]
-    file_name = save_generated_file(raw, kind="image")
-
-    return PhotoGenerateResponse(
-        image_base64=_to_base64(raw),
-        file_name=file_name,
-        file_url=get_file_url(file_name)
-    )
+    except Exception as e:
+        logger.error(f"Custom generation error: {e}")
+        raise HTTPException(500, str(e))
 
 
-# ----------------------
-# ENHANCE
-# ----------------------
+# ===== ENHANCE PHOTO =====
 
-@router.post("/generate/enhance", response_model=PhotoGenerateResponse)
+@router.post("/generate/enhance", response_model=PhotoGenerationResponse)
 async def enhance_photo(
-    body: EnhancePhotoRequest,
-    request: Request,
+    request: EnhancePhotoRequest,
+    user: dict = Depends(get_current_user),
 ):
-    image_url = normalize_photo_url(request, body.photo_url)
+    try:
+        result = await kie_service.enhance_photo(request.photo_url, request.level)
 
-    result = await kie_service.enhance_photo(image_url, body.level)
+        image_bytes = result["image"]
+        rel_path = save_generated_file(image_bytes, kind="image")
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
-    if "image" not in result:
-        raise HTTPException(status_code=500, detail="KIE did not return image")
+        return PhotoGenerationResponse(
+            image_base64=image_base64,
+            file_name=rel_path,
+            file_url=get_file_url(rel_path),
+        )
 
-    raw = result["image"]
-    file_name = save_generated_file(raw, kind="image")
-
-    return PhotoGenerateResponse(
-        image_base64=_to_base64(raw),
-        file_name=file_name,
-        file_url=get_file_url(file_name)
-    )
+    except Exception as e:
+        logger.error(f"Enhance photo error: {e}")
+        raise HTTPException(500, str(e))
 
 
-# ----------------------
-# VIDEO
-# ----------------------
+# ===== VIDEO GENERATION =====
 
-@router.post("/generate/video", response_model=VideoGenerateResponse)
+@router.post("/generate/video", response_model=VideoGenerationResponse)
 async def generate_video(
-    body: VideoGenerateRequest,
-    request: Request,
+    request: VideoGenerateRequest,
+    user: dict = Depends(get_current_user),
 ):
-    prompt = body.prompt
+    try:
+        prompt = request.prompt
 
-    if body.translate_to_en:
-        try:
-            prompt = await translator_service.translate_ru_to_en(prompt)
-        except:
-            pass
+        result = await kie_service.generate_video(
+            image_url=request.photo_url,
+            prompt=prompt,
+            model=request.model,
+            duration=request.duration,
+            resolution=request.resolution,
+        )
 
-    image_url = normalize_photo_url(request, body.photo_url)
+        video_bytes = result["video"]
+        rel_path = save_generated_file(video_bytes, kind="video")
+        video_base64 = base64.b64encode(video_bytes).decode("utf-8")
 
-    result = await kie_service.generate_video(
-        image_url=image_url,
-        prompt=prompt,
-        model=body.model or "grok/minimax-2.5",
-        duration=body.duration,
-        resolution=body.resolution or "1280x720",
-    )
+        return VideoGenerationResponse(
+            video_base64=video_base64,
+            file_name=rel_path,
+            file_url=get_file_url(rel_path),
+        )
 
-    if "video" not in result:
-        raise HTTPException(status_code=500, detail="KIE did not return video")
-
-    raw = result["video"]
-    file_name = save_generated_file(raw, kind="video")
-
-    return VideoGenerateResponse(
-        video_base64=_to_base64(raw),
-        file_name=file_name,
-        file_url=get_file_url(file_name)
-    )
-
-
-# ----------------------
-# OWN MODEL NORMALIZATION
-# ----------------------
-
-@router.post("/generate/normalize/own_model", response_model=PhotoGenerateResponse)
-async def normalize_own_model(
-    body: NormalizeOwnModelRequest,
-    request: Request,
-):
-    item_url = normalize_photo_url(request, body.item_photo_url)
-    model_url = normalize_photo_url(request, body.model_photo_url)
-
-    result = await kie_service.normalize_own_model(
-        item_image_url=item_url,
-        model_image_url=model_url,
-    )
-
-    if "image" not in result:
-        raise HTTPException(status_code=500, detail="KIE did not return image")
-
-    raw = result["image"]
-    file_name = save_generated_file(raw, kind="image")
-
-    return PhotoGenerateResponse(
-        image_base64=_to_base64(raw),
-        file_name=file_name,
-        file_url=get_file_url(file_name)
-    )
-
-
-# ----------------------
-# NEW MODEL NORMALIZATION
-# ----------------------
-
-@router.post("/generate/normalize/new_model", response_model=PhotoGenerateResponse)
-async def normalize_new_model(
-    body: NormalizeNewModelRequest,
-    request: Request,
-    db: Session = Depends(get_db_dependency),
-):
-    model_prompt = body.model_prompt
-
-    if body.model_item_id:
-        item = db.get(ModelItem, body.model_item_id)
-        if not item or not item.is_active:
-            raise HTTPException(status_code=404, detail="Model item not found")
-        model_prompt = item.prompt
-
-    if body.translate_to_en:
-        try:
-            model_prompt = await translator_service.translate_ru_to_en(model_prompt)
-        except:
-            pass
-
-    item_url = normalize_photo_url(request, body.item_photo_url)
-
-    result = await kie_service.normalize_new_model(
-        item_image_url=item_url,
-        model_prompt=model_prompt,
-    )
-
-    if "image" not in result:
-        raise HTTPException(status_code=500, detail="KIE did not return image")
-
-    raw = result["image"]
-    file_name = save_generated_file(raw, kind="image")
-
-    return PhotoGenerateResponse(
-        image_base64=_to_base64(raw),
-        file_name=file_name,
-        file_url=get_file_url(file_name)
-    )
-
-
-# ----------------------
-# UPLOAD
-# ----------------------
-
-@router.post("/upload", response_model=UploadPhotoResponse)
-async def upload_photo(file: UploadFile = File(...)):
-    raw = await file.read()
-
-    if not raw:
-        raise HTTPException(status_code=400, detail="Empty file")
-
-    file_name = save_generated_file(raw, kind="image")
-
-    return UploadPhotoResponse(
-        file_name=file_name,
-        file_url=get_file_url(file_name)
-    )
-
-
-# ----------------------
-# DELETE
-# ----------------------
-
-@router.delete("/files/{file_name}", status_code=204)
-async def delete_generated_file_endpoint(file_name: str):
-    if not delete_generated_file(file_name):
-        raise HTTPException(status_code=404, detail="File not found")
-    return Response(status_code=204)
+    except Exception as e:
+        logger.error(f"Video generation error: {e}")
+        raise HTTPException(500, str(e))

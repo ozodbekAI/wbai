@@ -3,7 +3,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List
 
 from core.database import get_db_dependency
 from repositories.model_repository import ModelRepository
@@ -48,7 +47,7 @@ def list_items(sub_id: int, db: Session = Depends(get_db_dependency)):
     return repo.get_items_by_subcategory(sub_id)
 
 
-# ===== ADMIN CRUD (xuddi scene/pose kabi) =====
+# ===== ADMIN CRUD =====
 
 admin_router = APIRouter(
     prefix="/api/admin/photo/models",

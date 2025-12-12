@@ -1,43 +1,13 @@
+// frontend/src/components/PhotoTemplatesAdmin.jsx
+
 import React, { useEffect, useState } from "react";
 import { Plus, Save, Trash2, Loader2, Image as ImageIcon } from "lucide-react";
-
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
-
-const buildUrl = (path) => `${API_BASE}${path}`;
-
-async function request(path, method = "GET", token, body) {
-  const res = await fetch(buildUrl(path), {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-  }
-
-  if (!res.ok) {
-    const msg =
-      data?.detail ||
-      data?.message ||
-      data?.error ||
-      res.statusText ||
-      "Request failed";
-    throw new Error(msg);
-  }
-
-  return data;
-}
+import { api } from "../api/client";
 
 export default function PhotoTemplatesAdmin({ token }) {
-  const [activeMode, setActiveMode] = useState("scenes"); 
+  const [activeMode, setActiveMode] = useState("scenes");
 
+  // ===== SCENES STATE =====
   const [sceneLoading, setSceneLoading] = useState(false);
   const [sceneCategories, setSceneCategories] = useState([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
@@ -56,6 +26,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     prompt: "",
   });
 
+  // ===== POSES STATE =====
   const [poseLoading, setPoseLoading] = useState(false);
   const [poseGroups, setPoseGroups] = useState([]);
   const [selectedGroupId, setSelectedGroupId] = useState(null);
@@ -74,6 +45,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     prompt: "",
   });
 
+  // ===== LOAD SCENES =====
   useEffect(() => {
     if (!token) return;
     if (activeMode !== "scenes") return;
@@ -81,11 +53,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     const loadScenes = async () => {
       setSceneLoading(true);
       try {
-        const cats = await request(
-          "/api/photo/scenes/categories",
-          "GET",
-          token
-        );
+        const cats = await api.photo.scenes.listCategories(token);
         setSceneCategories(cats || []);
       } catch (err) {
         console.error("Failed to load scene categories", err);
@@ -107,11 +75,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     setItemForm({ id: null, name: "", prompt: "" });
 
     try {
-      const subcats = await request(
-        `/api/photo/scenes/${cat.id}/subcategories`,
-        "GET",
-        token
-      );
+      const subcats = await api.photo.scenes.listSubcategories(token, cat.id);
       setSceneSubcategories(subcats || []);
     } catch (err) {
       console.error("Failed to load subcategories", err);
@@ -125,11 +89,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     setItemForm({ id: null, name: "", prompt: "" });
 
     try {
-      const items = await request(
-        `/api/photo/scenes/subcategories/${sub.id}/items`,
-        "GET",
-        token
-      );
+      const items = await api.photo.scenes.listItems(token, sub.id);
       setSceneItems(items || []);
     } catch (err) {
       console.error("Failed to load items", err);
@@ -144,7 +104,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     });
   };
 
-  // CREATE/UPDATE/DELETE SCENES
+  // ===== CREATE/UPDATE/DELETE SCENES =====
   const saveSceneCategory = async () => {
     if (!token) return;
     if (!categoryForm.name.trim()) {
@@ -153,11 +113,10 @@ export default function PhotoTemplatesAdmin({ token }) {
     }
     try {
       if (categoryForm.id) {
-        // update
-        const updated = await request(
-          `/api/admin/photo/scenes/categories/${categoryForm.id}`,
-          "PATCH",
+        // UPDATE
+        const updated = await api.photo.scenes.updateCategory(
           token,
+          categoryForm.id,
           { name: categoryForm.name }
         );
         setSceneCategories((prev) =>
@@ -165,13 +124,10 @@ export default function PhotoTemplatesAdmin({ token }) {
         );
         alert("Категория обновлена");
       } else {
-        // create
-        const created = await request(
-          "/api/admin/photo/scenes/categories",
-          "POST",
-          token,
-          { name: categoryForm.name }
-        );
+        // CREATE
+        const created = await api.photo.scenes.createCategory(token, {
+          name: categoryForm.name,
+        });
         setSceneCategories((prev) => [...prev, created]);
         setCategoryForm({ id: created.id, name: created.name });
         alert("Категория создана");
@@ -187,11 +143,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     if (!window.confirm("Удалить категорию со всеми данными?")) return;
 
     try {
-      await request(
-        `/api/admin/photo/scenes/categories/${categoryForm.id}`,
-        "DELETE",
-        token
-      );
+      await api.photo.scenes.deleteCategory(token, categoryForm.id);
       setSceneCategories((prev) =>
         prev.filter((c) => c.id !== categoryForm.id)
       );
@@ -220,10 +172,9 @@ export default function PhotoTemplatesAdmin({ token }) {
 
     try {
       if (subcategoryForm.id) {
-        const updated = await request(
-          `/api/admin/photo/scenes/subcategories/${subcategoryForm.id}`,
-          "PATCH",
+        const updated = await api.photo.scenes.updateSubcategory(
           token,
+          subcategoryForm.id,
           { name: subcategoryForm.name }
         );
         setSceneSubcategories((prev) =>
@@ -231,10 +182,9 @@ export default function PhotoTemplatesAdmin({ token }) {
         );
         alert("Подкатегория обновлена");
       } else {
-        const created = await request(
-          `/api/admin/photo/scenes/categories/${selectedCategoryId}/subcategories`,
-          "POST",
+        const created = await api.photo.scenes.createSubcategory(
           token,
+          selectedCategoryId,
           { name: subcategoryForm.name }
         );
         setSceneSubcategories((prev) => [...prev, created]);
@@ -252,11 +202,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     if (!window.confirm("Удалить подкатегорию со всеми сценами?")) return;
 
     try {
-      await request(
-        `/api/admin/photo/scenes/subcategories/${subcategoryForm.id}`,
-        "DELETE",
-        token
-      );
+      await api.photo.scenes.deleteSubcategory(token, subcategoryForm.id);
       setSceneSubcategories((prev) =>
         prev.filter((s) => s.id !== subcategoryForm.id)
       );
@@ -283,24 +229,18 @@ export default function PhotoTemplatesAdmin({ token }) {
 
     try {
       if (itemForm.id) {
-        const updated = await request(
-          `/api/admin/photo/scenes/items/${itemForm.id}`,
-          "PATCH",
-          token,
-          {
-            name: itemForm.name,
-            prompt: itemForm.prompt || "",
-          }
-        );
+        const updated = await api.photo.scenes.updateItem(token, itemForm.id, {
+          name: itemForm.name,
+          prompt: itemForm.prompt || "",
+        });
         setSceneItems((prev) =>
           prev.map((i) => (i.id === updated.id ? updated : i))
         );
         alert("Сцена обновлена");
       } else {
-        const created = await request(
-          `/api/admin/photo/scenes/subcategories/${selectedSubcategoryId}/items`,
-          "POST",
+        const created = await api.photo.scenes.createItem(
           token,
+          selectedSubcategoryId,
           {
             name: itemForm.name,
             prompt: itemForm.prompt || "",
@@ -325,11 +265,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     if (!window.confirm("Удалить сцену?")) return;
 
     try {
-      await request(
-        `/api/admin/photo/scenes/items/${itemForm.id}`,
-        "DELETE",
-        token
-      );
+      await api.photo.scenes.deleteItem(token, itemForm.id);
       setSceneItems((prev) => prev.filter((i) => i.id !== itemForm.id));
       setItemForm({ id: null, name: "", prompt: "" });
       alert("Сцена удалена");
@@ -347,7 +283,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     const loadPoses = async () => {
       setPoseLoading(true);
       try {
-        const groups = await request("/api/photo/poses/groups", "GET", token);
+        const groups = await api.photo.poses.listGroups(token);
         setPoseGroups(groups || []);
       } catch (err) {
         console.error("Failed to load pose groups", err);
@@ -369,11 +305,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     setPosePromptForm({ id: null, name: "", prompt: "" });
 
     try {
-      const subs = await request(
-        `/api/photo/poses/groups/${group.id}/subgroups`,
-        "GET",
-        token
-      );
+      const subs = await api.photo.poses.listSubgroups(token, group.id);
       setPoseSubgroups(subs || []);
     } catch (err) {
       console.error("Failed to load pose subgroups", err);
@@ -387,11 +319,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     setPosePromptForm({ id: null, name: "", prompt: "" });
 
     try {
-      const prompts = await request(
-        `/api/photo/poses/subgroups/${sub.id}/prompts`,
-        "GET",
-        token
-      );
+      const prompts = await api.photo.poses.listPrompts(token, sub.id);
       setPosePrompts(prompts || []);
     } catch (err) {
       console.error("Failed to load pose prompts", err);
@@ -406,7 +334,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     });
   };
 
-  // CREATE/UPDATE/DELETE POSES (admin endpoints — backendda shu URL’larga moslab yozasan)
+  // ===== CREATE/UPDATE/DELETE POSES =====
   const savePoseGroup = async () => {
     if (!token) return;
     if (!groupForm.name.trim()) {
@@ -415,10 +343,9 @@ export default function PhotoTemplatesAdmin({ token }) {
     }
     try {
       if (groupForm.id) {
-        const updated = await request(
-          `/api/admin/photo/poses/groups/${groupForm.id}`,
-          "PATCH",
+        const updated = await api.photo.poses.updateGroup(
           token,
+          groupForm.id,
           { name: groupForm.name }
         );
         setPoseGroups((prev) =>
@@ -426,12 +353,9 @@ export default function PhotoTemplatesAdmin({ token }) {
         );
         alert("Группа поз обновлена");
       } else {
-        const created = await request(
-          `/api/admin/photo/poses/groups`,
-          "POST",
-          token,
-          { name: groupForm.name }
-        );
+        const created = await api.photo.poses.createGroup(token, {
+          name: groupForm.name,
+        });
         setPoseGroups((prev) => [...prev, created]);
         setGroupForm({ id: created.id, name: created.name });
         alert("Группа поз создана");
@@ -447,11 +371,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     if (!window.confirm("Удалить группу поз?")) return;
 
     try {
-      await request(
-        `/api/admin/photo/poses/groups/${groupForm.id}`,
-        "DELETE",
-        token
-      );
+      await api.photo.poses.deleteGroup(token, groupForm.id);
       setPoseGroups((prev) => prev.filter((g) => g.id !== groupForm.id));
       setGroupForm({ id: null, name: "" });
       setSelectedGroupId(null);
@@ -477,10 +397,9 @@ export default function PhotoTemplatesAdmin({ token }) {
     }
     try {
       if (poseSubgroupForm.id) {
-        const updated = await request(
-          `/api/admin/photo/poses/subgroups/${poseSubgroupForm.id}`,
-          "PATCH",
+        const updated = await api.photo.poses.updateSubgroup(
           token,
+          poseSubgroupForm.id,
           { name: poseSubgroupForm.name }
         );
         setPoseSubgroups((prev) =>
@@ -488,10 +407,9 @@ export default function PhotoTemplatesAdmin({ token }) {
         );
         alert("Подгруппа поз обновлена");
       } else {
-        const created = await request(
-          `/api/admin/photo/poses/groups/${selectedGroupId}/subgroups`,
-          "POST",
+        const created = await api.photo.poses.createSubgroup(
           token,
+          selectedGroupId,
           { name: poseSubgroupForm.name }
         );
         setPoseSubgroups((prev) => [...prev, created]);
@@ -509,11 +427,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     if (!window.confirm("Удалить подгруппу поз?")) return;
 
     try {
-      await request(
-        `/api/admin/photo/poses/subgroups/${poseSubgroupForm.id}`,
-        "DELETE",
-        token
-      );
+      await api.photo.poses.deleteSubgroup(token, poseSubgroupForm.id);
       setPoseSubgroups((prev) =>
         prev.filter((s) => s.id !== poseSubgroupForm.id)
       );
@@ -540,10 +454,9 @@ export default function PhotoTemplatesAdmin({ token }) {
 
     try {
       if (posePromptForm.id) {
-        const updated = await request(
-          `/api/admin/photo/poses/prompts/${posePromptForm.id}`,
-          "PATCH",
+        const updated = await api.photo.poses.updatePrompt(
           token,
+          posePromptForm.id,
           {
             name: posePromptForm.name,
             prompt: posePromptForm.prompt || "",
@@ -554,10 +467,9 @@ export default function PhotoTemplatesAdmin({ token }) {
         );
         alert("Поза обновлена");
       } else {
-        const created = await request(
-          `/api/admin/photo/poses/subgroups/${selectedSubgroupId}/prompts`,
-          "POST",
+        const created = await api.photo.poses.createPrompt(
           token,
+          selectedSubgroupId,
           {
             name: posePromptForm.name,
             prompt: posePromptForm.prompt || "",
@@ -582,11 +494,7 @@ export default function PhotoTemplatesAdmin({ token }) {
     if (!window.confirm("Удалить позу?")) return;
 
     try {
-      await request(
-        `/api/admin/photo/poses/prompts/${posePromptForm.id}`,
-        "DELETE",
-        token
-      );
+      await api.photo.poses.deletePrompt(token, posePromptForm.id);
       setPosePrompts((prev) =>
         prev.filter((p) => p.id !== posePromptForm.id)
       );
@@ -756,7 +664,7 @@ export default function PhotoTemplatesAdmin({ token }) {
           </div>
         </div>
 
-        {/* Items (scene items) */}
+        {/* Items */}
         <div className="flex flex-col">
           <div className="px-3 py-2 text-[11px] font-semibold text-gray-700 flex items-center justify-between border-b">
             <span>Сцены (item + prompt)</span>
@@ -927,9 +835,7 @@ export default function PhotoTemplatesAdmin({ token }) {
             <span>Подгруппы поз</span>
             <button
               type="button"
-              onClick={() =>
-                setPoseSubgroupForm({ id: null, name: "" })
-              }
+              onClick={() => setPoseSubgroupForm({ id: null, name: "" })}
               className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-violet-600 text-white hover:bg-violet-700"
             >
               <Plus className="w-3 h-3" />
@@ -1084,9 +990,9 @@ export default function PhotoTemplatesAdmin({ token }) {
     </div>
   );
 
+  // ===== ROOT RENDER =====
   return (
     <div className="flex-1 flex flex-col">
-      {/* Local header for photo admin */}
       <div className="px-4 py-2 border-b flex items-center justify-between bg-gray-50/50">
         <div className="flex items-center gap-2 text-xs">
           <ImageIcon className="w-4 h-4 text-violet-600" />

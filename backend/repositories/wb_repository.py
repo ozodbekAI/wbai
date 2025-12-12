@@ -1,3 +1,5 @@
+# repositories/wb_repository.py
+
 from typing import List, Dict, Any
 import requests
 
@@ -15,7 +17,7 @@ class WBRepository:
             raise ValueError("WB_API_KEY not set")
 
         return {
-            "Authorization": settings.WB_API_KEY,  # WB key bu yerga to'g'ri qo'yilgan bo'lishi kerak
+            "Authorization": settings.WB_API_KEY,
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
@@ -64,7 +66,6 @@ class WBRepository:
         """
         WB content/v2/get/cards/list endpointiga textSearch=article bilan POST yuboradi
         va "cards" massivini qaytaradi.
-        textSearch doim STRING bo'lishi kerak.
         """
         headers = self._get_headers()
         url = f"{self.BASE_URL}/content/v2/get/cards/list"
@@ -99,8 +100,7 @@ class WBRepository:
 
     def get_card_by_article(self, article: str) -> Dict[str, Any]:
         """
-        article (vendorCode, nmID yoki shunga o'xshash qidiruv satri) bo'yicha
-        WB'dan bitta eng mos kartani qaytaradi.
+        article bo‘yicha WB'dan bitta eng mos kartani qaytaradi.
         """
         cards = self.get_cards_by_article(article)
 
@@ -119,35 +119,20 @@ class WBRepository:
 
         nm_id = None
         try:
-            nm_id = int(article)
+          nm_id = int(article)
         except ValueError:
-            pass
+          pass
 
         if nm_id is not None:
-            for card in cards:
-                if card.get("nmID") == nm_id:
-                    return card
+          for card in cards:
+            if card.get("nmID") == nm_id:
+              return card
 
         return cards[0]
 
     def update_cards(self, cards: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         POST /content/v2/cards/update
-
-        cards – WB dokumentatsiyadagi array:
-        [
-          {
-            "nmID": ...,
-            "vendorCode": "...",
-            "brand": "...",
-            "title": "...",
-            "description": "...",
-            "dimensions": {...},
-            "characteristics": [...],
-            "sizes": [...]
-          },
-          ...
-        ]
         """
         url = f"{self.BASE_URL}/content/v2/cards/update"
         headers = self._get_headers()
@@ -173,7 +158,6 @@ class WBRepository:
     ) -> Dict[str, Any]:
         """
         POST /content/v3/media/file
-        Faylni WB media API ga yuklaydi.
         """
         url = f"{self.BASE_URL}/content/v3/media/file"
         headers = self._get_headers()
@@ -194,7 +178,6 @@ class WBRepository:
     def save_media_state(self, nm_id: int, urls: List[str]) -> Dict[str, Any]:
         """
         POST /content/v3/media/save
-        urls: ["https://.../1.jpg", "https://.../2.jpg", ...]
         """
         url = f"{self.BASE_URL}/content/v3/media/save"
         headers = self._get_headers()

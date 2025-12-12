@@ -112,6 +112,16 @@ class ModelItem(Base):
     subcategory: Mapped["ModelSubcategory"] = relationship("ModelSubcategory", back_populates="items")
 
 
+class VideoScenario(Base):
+    __tablename__ = "video_scenarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    prompt: Mapped[str] = mapped_column(Text)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
 class SceneCategory(Base):
     __tablename__ = "scene_categories"
     
