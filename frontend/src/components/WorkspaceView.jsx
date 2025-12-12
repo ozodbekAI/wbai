@@ -1,6 +1,5 @@
 // ============================================
-// FILE 3: src/components/WorkspaceView.jsx
-// COMPLETE VERSION - Copy this entire file
+// FILE: src/components/WorkspaceView.jsx
 // ============================================
 
 import {
@@ -28,13 +27,16 @@ import PhotoStudio from "./PhotoAiEditor";
 import PhotoTemplatesPanel from "./PhotoTemplatesPanel";
 import PhotosGrid from "./PhotosGrid";
 import { syncWbMedia } from "../api/wbMediaApi";
-import { updateWbCards } from "../api/wbCardsApi"; 
+import { updateWbCards } from "../api/wbCardsApi";
 
-import { message } from "antd"; 
+import { message } from "antd";
 
 import { api } from "../api/client";
 
 export default function WorkspaceView({ token, username, onLogout }) {
+  // Qaysi sahifa: asosiy ("main") yoki Raski page ("raski")
+  const [activeView, setActiveView] = useState("main");
+
   const [cardPhotos, setCardPhotos] = useState([]);
   const [article, setArticle] = useState("");
   const [error, setError] = useState("");
@@ -43,7 +45,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const [processing, setProcessing] = useState(false);
 
   const [cardVideo, setCardVideo] = useState(null);
-
 
   const [card, setCard] = useState(null);
   const [result, setResult] = useState(null);
@@ -60,18 +61,11 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const [historyStats, setHistoryStats] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  const handleOpenPhotoStudio = () => setPhotoStudioOpen(true);
-  const handleClosePhotoStudio = () => setPhotoStudioOpen(false);
-
-  const handleUpdateCardPhotos = (newPhotos) => {
-    setCardPhotos(newPhotos);
-  };
-
   // PROMPTS / PHOTO TEMPLATES
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [photoTemplatesOpen, setPhotoTemplatesOpen] = useState(false);
 
-  // PHOTO STUDIO (AI modal)
+  // PHOTO STUDIO (AI modal – WB kartochka uchun)
   const [photoStudioOpen, setPhotoStudioOpen] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -115,15 +109,11 @@ export default function WorkspaceView({ token, username, onLogout }) {
 
       setCard(data.card);
       setCurrentValidation(data.response || null);
-
-      setCard(data.card);
-      setCurrentValidation(data.response || null);
-
       setCardVideo(data.card.video || null);
 
       const photosFromCard = (data.card?.photos || [])
         .map((p) => ({
-          photoId: p.photoId, // hozircha kerak emas, lekin qoldirsa bo'ladi
+          photoId: p.photoId,
           url: p.big || p.hq || p.square || p.c516x688 || p.c246x328,
           isNew: false,
         }))
@@ -140,14 +130,10 @@ export default function WorkspaceView({ token, username, onLogout }) {
     }
   };
 
-  
-
   const handleClearError = () => setError("");
   const handleCancelCurrent = () => {
     setProcessingCurrent(false);
   };
-
-  
 
   async function savePhotoOrderToWB(updatedPhotos) {
     try {
@@ -171,7 +157,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
       pushLog("❌ Ошибка: " + err.message);
     }
   }
-
 
   /** final inicializatsiya */
   const initFinalFromResult = (cardData, res) => {
@@ -356,9 +341,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
       const base = fromNew || fromOld;
 
       let rawVal =
-        name in finalCharValues
-          ? finalCharValues[name]
-          : base?.value ?? [];
+        name in finalCharValues ? finalCharValues[name] : base?.value ?? [];
 
       const arr = Array.isArray(rawVal)
         ? rawVal
@@ -435,7 +418,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
     }
   }
 
-
   const handleDownloadJson = () => {
     if (!finalData) return;
     const blob = new Blob([JSON.stringify(finalData, null, 2)], {
@@ -487,16 +469,12 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const handleClosePhotoTemplates = () => setPhotoTemplatesOpen(false);
 
   /** PhotosGrid uchun handlerlar */
-  const handleOpenUpload = () => {
-    fileInputRef.current?.click();
-  };
-
   const handleFilesChange = (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
     const newItems = files.map((f) => ({
-      photoId: null,     // WBda hali yo‘q
+      photoId: null,
       url: URL.createObjectURL(f),
       file: f,
       isNew: true,
@@ -507,24 +485,71 @@ export default function WorkspaceView({ token, username, onLogout }) {
     e.target.value = "";
   };
 
-
-  const handleReorderPhotos = (newOrder) => {
-    setCardPhotos(newOrder);
+  // HEADERDAGI RASKI – yangi PAGE
+  const handleOpenRaskiPage = () => {
+    setActiveView("raski");
   };
 
-  const handleSavePhotosOrder = (newOrder) => {
-    console.log("Save photo order:", newOrder);
+  const handleCloseRaskiPage = () => {
+    setActiveView("main");
   };
 
+  const handleUpdateCardPhotos = (newPhotos) => {
+    setCardPhotos(newPhotos);
+  };
+
+  // ---- RASKI PAGE BRANCH ----
+  if (activeView === "raski") {
+    return (
+      <div className="min-h-screen bg-gray-100">
+        <HeaderBar
+          username={username}
+          onLogout={onLogout}
+          onOpenPrompts={handleOpenPrompts}
+          onOpenPhotoSettings={handleOpenPhotoTemplates}
+          // Raski sahifasida RASKI tugmasi ko‘rinmasin – undefined
+          onOpenPhotoStudio={undefined}
+          onDownloadExcel={handleDownloadExcel}
+        />
+
+        <main className="max-w-[1800px] mx-auto px-6 py-6">
+          {/* Yangi RASKI sahifasi – faqat AI studiýa, kartochka chap panelisiz */}
+          <PhotoStudio
+            token={token}
+            cardPhotos={cardPhotos}
+            onUpdateCardPhotos={handleUpdateCardPhotos}
+            onClose={handleCloseRaskiPage}
+            mode="page"
+            showCardColumn={false}
+          />
+        </main>
+
+        {/* PROMPTS & TEMPLATES ham ishlayversin */}
+        <PromptsPanel
+          open={promptsOpen}
+          onClose={handleClosePrompts}
+          token={token}
+        />
+        <PhotoTemplatesPanel
+          open={photoTemplatesOpen}
+          onClose={handleClosePhotoTemplates}
+          token={token}
+        />
+      </div>
+    );
+  }
+
+  // ---- ASOSIY (WB KARTOCHKA) BRANCH ----
   return (
     <div className="min-h-screen bg-gray-100">
       <HeaderBar
         username={username}
         onLogout={onLogout}
-        onOpenPrompts={() => setPromptsOpen(true)}
-        onOpenPhotoSettings={() => setPhotoTemplatesOpen(true)}
-        onOpenPhotoStudio={handleOpenPhotoStudio} // NEW
-        onDownloadExcel={() => console.log("Download Excel")}
+        onOpenPrompts={handleOpenPrompts}
+        onOpenPhotoSettings={handleOpenPhotoTemplates}
+        // Bu yerda RASKI tugmasi yangi page’ni ochadi
+        onOpenPhotoStudio={handleOpenRaskiPage}
+        onDownloadExcel={handleDownloadExcel}
       />
 
       <main className="max-w-[1800px] mx-auto px-6 py-6">
@@ -557,8 +582,8 @@ export default function WorkspaceView({ token, username, onLogout }) {
             {/* PHOTOS GRID */}
             <PhotosGrid
               photos={cardPhotos}
-              videoUrl={cardVideo}                // YANGI QATOR
-              onGenerate={() => setPhotoStudioOpen(true)}
+              videoUrl={cardVideo}
+              onGenerate={() => setPhotoStudioOpen(true)} // WB kartochka uchun eski modal
               onReorder={(newOrder) => setCardPhotos(newOrder)}
               onSaveOrder={savePhotoOrderToWB}
             />
@@ -630,24 +655,25 @@ export default function WorkspaceView({ token, username, onLogout }) {
       {/* PROMPTS ADMIN PANEL */}
       <PromptsPanel
         open={promptsOpen}
-        onClose={() => setPromptsOpen(false)}
+        onClose={handleClosePrompts}
         token={token}
       />
 
       {/* PHOTO TEMPLATES ADMIN PANEL */}
       <PhotoTemplatesPanel
         open={photoTemplatesOpen}
-        onClose={() => setPhotoTemplatesOpen(false)}
+        onClose={handleClosePhotoTemplates}
         token={token}
       />
 
-      {/* PHOTO AI EDITOR MODAL */}
+      {/* PHOTO AI EDITOR MODAL – WB kartochka uchun eski variant */}
       {photoStudioOpen && (
         <PhotoStudio
           token={token}
           cardPhotos={cardPhotos}
           onUpdateCardPhotos={handleUpdateCardPhotos}
-          onClose={handleClosePhotoStudio}
+          onClose={() => setPhotoStudioOpen(false)}
+          // bu yerda default: mode="modal", showCardColumn=true
         />
       )}
     </div>
