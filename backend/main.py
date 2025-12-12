@@ -8,9 +8,13 @@ from core.database import init_db
 from routers import auth, process, process_batch, history
 from routers.admin import users, admin_promts, keywords, photo_template
 from routers import photo_templates, photo_generator, wb_media, wb_cards
-from routers import photo_models, admin_photo_models  # MUHIM: router modulini import
+from routers import photo_models, admin_photo_models 
 
 from routers import photo_upload_router
+
+from routers import video_scenarios_router, admin_video_scenarios_router
+
+from routers.photo_ui_config import router as photo_ui_config_router
 
 # Initialize database
 init_db()
@@ -53,6 +57,11 @@ app.include_router(admin_photo_models)
 app.include_router(photo_models)
 
 app.include_router(photo_upload_router)
+
+app.include_router(video_scenarios_router)
+app.include_router(admin_video_scenarios_router)
+
+app.include_router(photo_ui_config_router)
 
 # Media fayllar
 app.mount("/media", StaticFiles(directory=settings.MEDIA_ROOT), name="media")

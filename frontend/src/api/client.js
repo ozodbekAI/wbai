@@ -2,10 +2,7 @@
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-export async function request(
-  path,
-  { method = "GET", token, body, params } = {}
-) {
+export async function request(path, { method = "GET", token, body, params } = {}) {
   const urlObj = new URL(`${API_URL}${path}`);
 
   if (params && typeof params === "object") {
@@ -30,6 +27,7 @@ export async function request(
 
   const res = await fetch(urlObj.toString(), options);
   const text = await res.text();
+
   let data;
   try {
     data = text ? JSON.parse(text) : null;
@@ -37,10 +35,9 @@ export async function request(
     data = text;
   }
 
-  if (!res.ok)
-    throw new Error(
-      data?.detail || data?.errorText || `HTTP ${res.status}`
-    );
+  if (!res.ok) {
+    throw new Error(data?.detail || data?.errorText || `HTTP ${res.status}`);
+  }
   return data;
 }
 
@@ -100,33 +97,16 @@ export const api = {
   },
 
   prompts: {
-    list: (token) =>
-      request("/api/admin/prompts", {
-        method: "GET",
-        token,
-      }),
+    list: (token) => request("/api/admin/prompts", { method: "GET", token }),
 
     get: (token, promptType) =>
-      request(`/api/admin/prompts/${encodeURIComponent(promptType)}`, {
-        method: "GET",
-        token,
-      }),
+      request(`/api/admin/prompts/${encodeURIComponent(promptType)}`, { method: "GET", token }),
 
     preview: (token, promptType) =>
-      request(
-        `/api/admin/prompts/${encodeURIComponent(promptType)}/preview`,
-        {
-          method: "GET",
-          token,
-        }
-      ),
+      request(`/api/admin/prompts/${encodeURIComponent(promptType)}/preview`, { method: "GET", token }),
 
     create: (token, payload) =>
-      request("/api/admin/prompts", {
-        method: "POST",
-        token,
-        body: payload,
-      }),
+      request("/api/admin/prompts", { method: "POST", token, body: payload }),
 
     update: (token, promptType, payload) =>
       request(`/api/admin/prompts/${encodeURIComponent(promptType)}`, {
@@ -142,255 +122,154 @@ export const api = {
       }),
 
     activate: (token, promptType) =>
-      request(
-        `/api/admin/prompts/${encodeURIComponent(promptType)}/activate`,
-        {
-          method: "POST",
-          token,
-        }
-      ),
+      request(`/api/admin/prompts/${encodeURIComponent(promptType)}/activate`, { method: "POST", token }),
 
     types: (token) =>
-      request("/api/admin/prompts/types/available", {
+      request("/api/admin/prompts/types/available", { method: "GET", token }),
+
+    versions: (token, promptType) =>
+      request(`/api/admin/prompts/${encodeURIComponent(promptType)}/versions`, { method: "GET", token }),
+  },
+
+  // ===== VIDEO API =====
+  video: {
+    getScenarios: (token) =>
+      request("/api/video/scenarios", {
         method: "GET",
         token,
       }),
-
-    versions: (token, promptType) =>
-      request(
-        `/api/admin/prompts/${encodeURIComponent(promptType)}/versions`,
-        {
-          method: "GET",
-          token,
-        }
-      ),
   },
 
+  // ===== PHOTO API =====
   photo: {
+    // ✅ GENERATED (RIGHT BLOCK uchun)
+    generated: {
+      list: (token, { limit = 24, offset = 0 } = {}) =>
+        request("/api/photo/generated", {
+          method: "GET",
+          token,
+          params: { limit, offset },
+        }),
+
+      delete: (token, file_name) =>
+        request("/api/photo/generated", {
+          method: "DELETE",
+          token,
+          params: { file_name },
+        }),
+    },
+
     // ===== Scenes =====
     scenes: {
       listCategories: (token) =>
         request("/api/photo/scenes/categories", { method: "GET", token }),
 
       listSubcategories: (token, categoryId) =>
-        request(`/api/photo/scenes/${categoryId}/subcategories`, {
-          method: "GET",
-          token,
-        }),
+        request(`/api/photo/scenes/${categoryId}/subcategories`, { method: "GET", token }),
 
       listItems: (token, subcategoryId) =>
-        request(`/api/photo/scenes/subcategories/${subcategoryId}/items`, {
-          method: "GET",
-          token,
-        }),
+        request(`/api/photo/scenes/subcategories/${subcategoryId}/items`, { method: "GET", token }),
 
       createCategory: (token, payload) =>
-        request("/api/admin/photo/scenes/categories", {
-          method: "POST",
-          token,
-          body: payload,
-        }),
+        request("/api/admin/photo/scenes/categories", { method: "POST", token, body: payload }),
 
       updateCategory: (token, id, payload) =>
-        request(`/api/admin/photo/scenes/categories/${id}`, {
-          method: "PUT",
-          token,
-          body: payload,
-        }),
+        request(`/api/admin/photo/scenes/categories/${id}`, { method: "PUT", token, body: payload }),
 
       deleteCategory: (token, id) =>
-        request(`/api/admin/photo/scenes/categories/${id}`, {
-          method: "DELETE",
-          token,
-        }),
+        request(`/api/admin/photo/scenes/categories/${id}`, { method: "DELETE", token }),
 
       createSubcategory: (token, categoryId, payload) =>
-        request(
-          `/api/admin/photo/scenes/categories/${categoryId}/subcategories`,
-          {
-            method: "POST",
-            token,
-            body: payload,
-          }
-        ),
-
-      updateSubcategory: (token, id, payload) =>
-        request(`/api/admin/photo/scenes/subcategories/${id}`, {
-          method: "PUT",
-          token,
-          body: payload,
-        }),
-
-      deleteSubcategory: (token, id) =>
-        request(`/api/admin/photo/scenes/subcategories/${id}`, {
-          method: "DELETE",
-          token,
-        }),
-
-      createItem: (token, subcatId, payload) =>
-        request(`/api/admin/photo/scenes/subcategories/${subcatId}/items`, {
+        request(`/api/admin/photo/scenes/categories/${categoryId}/subcategories`, {
           method: "POST",
           token,
           body: payload,
         }),
 
+      updateSubcategory: (token, id, payload) =>
+        request(`/api/admin/photo/scenes/subcategories/${id}`, { method: "PUT", token, body: payload }),
+
+      deleteSubcategory: (token, id) =>
+        request(`/api/admin/photo/scenes/subcategories/${id}`, { method: "DELETE", token }),
+
+      createItem: (token, subcatId, payload) =>
+        request(`/api/admin/photo/scenes/subcategories/${subcatId}/items`, { method: "POST", token, body: payload }),
+
       updateItem: (token, id, payload) =>
-        request(`/api/admin/photo/scenes/items/${id}`, {
-          method: "PUT",
-          token,
-          body: payload,
-        }),
+        request(`/api/admin/photo/scenes/items/${id}`, { method: "PUT", token, body: payload }),
 
       deleteItem: (token, id) =>
-        request(`/api/admin/photo/scenes/items/${id}`, {
-          method: "DELETE",
-          token,
-        }),
+        request(`/api/admin/photo/scenes/items/${id}`, { method: "DELETE", token }),
     },
 
     // ===== Poses =====
     poses: {
-      listGroups: (token) =>
-        request("/api/photo/poses/groups", { method: "GET", token }),
+      listGroups: (token) => request("/api/photo/poses/groups", { method: "GET", token }),
 
       listSubgroups: (token, groupId) =>
-        request(`/api/photo/poses/groups/${groupId}/subgroups`, {
-          method: "GET",
-          token,
-        }),
+        request(`/api/photo/poses/groups/${groupId}/subgroups`, { method: "GET", token }),
 
       listPrompts: (token, subgroupId) =>
-        request(`/api/photo/poses/subgroups/${subgroupId}/prompts`, {
-          method: "GET",
-          token,
-        }),
+        request(`/api/photo/poses/subgroups/${subgroupId}/prompts`, { method: "GET", token }),
 
       createGroup: (token, payload) =>
-        request("/api/admin/photo/poses/groups", {
-          method: "POST",
-          token,
-          body: payload,
-        }),
+        request("/api/admin/photo/poses/groups", { method: "POST", token, body: payload }),
 
       updateGroup: (token, id, payload) =>
-        request(`/api/admin/photo/poses/groups/${id}`, {
-          method: "PUT",
-          token,
-          body: payload,
-        }),
+        request(`/api/admin/photo/poses/groups/${id}`, { method: "PUT", token, body: payload }),
 
       deleteGroup: (token, id) =>
-        request(`/api/admin/photo/poses/groups/${id}`, {
-          method: "DELETE",
-          token,
-        }),
+        request(`/api/admin/photo/poses/groups/${id}`, { method: "DELETE", token }),
 
       createSubgroup: (token, groupId, payload) =>
-        request(`/api/admin/photo/poses/groups/${groupId}/subgroups`, {
-          method: "POST",
-          token,
-          body: payload,
-        }),
+        request(`/api/admin/photo/poses/groups/${groupId}/subgroups`, { method: "POST", token, body: payload }),
 
       updateSubgroup: (token, id, payload) =>
-        request(`/api/admin/photo/poses/subgroups/${id}`, {
-          method: "PUT",
-          token,
-          body: payload,
-        }),
+        request(`/api/admin/photo/poses/subgroups/${id}`, { method: "PUT", token, body: payload }),
 
       deleteSubgroup: (token, id) =>
-        request(`/api/admin/photo/poses/subgroups/${id}`, {
-          method: "DELETE",
-          token,
-        }),
+        request(`/api/admin/photo/poses/subgroups/${id}`, { method: "DELETE", token }),
 
       createPrompt: (token, subgroupId, payload) =>
-        request(`/api/admin/photo/poses/subgroups/${subgroupId}/prompts`, {
-          method: "POST",
-          token,
-          body: payload,
-        }),
+        request(`/api/admin/photo/poses/subgroups/${subgroupId}/prompts`, { method: "POST", token, body: payload }),
 
       updatePrompt: (token, id, payload) =>
-        request(`/api/admin/photo/poses/prompts/${id}`, {
-          method: "PUT",
-          token,
-          body: payload,
-        }),
+        request(`/api/admin/photo/poses/prompts/${id}`, { method: "PUT", token, body: payload }),
 
       deletePrompt: (token, id) =>
-        request(`/api/admin/photo/poses/prompts/${id}`, {
-          method: "DELETE",
-          token,
-        }),
+        request(`/api/admin/photo/poses/prompts/${id}`, { method: "DELETE", token }),
     },
 
     // ===== MODELS (normalize uchun) =====
     models: {
-      listCategories: (token) =>
-        request("/api/photo/models/categories", { method: "GET", token }),
+      listCategories: (token) => request("/api/photo/models/categories", { method: "GET", token }),
 
       listSubcategories: (token, categoryId) =>
-        request(`/api/photo/models/categories/${categoryId}/subcategories`, {
-          method: "GET",
-          token,
-        }),
+        request(`/api/photo/models/categories/${categoryId}/subcategories`, { method: "GET", token }),
 
       listItems: (token, subId) =>
-        request(`/api/photo/models/subcategories/${subId}/items`, {
-          method: "GET",
-          token,
-        }),
+        request(`/api/photo/models/subcategories/${subId}/items`, { method: "GET", token }),
 
       createCategory: (token, payload) =>
-        request("/api/admin/photo/models/categories", {
-          method: "POST",
-          token,
-          body: payload,
-        }),
+        request("/api/admin/photo/models/categories", { method: "POST", token, body: payload }),
 
       deleteCategory: (token, id) =>
-        request(`/api/admin/photo/models/categories/${id}`, {
-          method: "DELETE",
-          token,
-        }),
+        request(`/api/admin/photo/models/categories/${id}`, { method: "DELETE", token }),
 
       createSubcategory: (token, categoryId, payload) =>
-        request(
-          `/api/admin/photo/models/categories/${categoryId}/subcategories`,
-          {
-            method: "POST",
-            token,
-            body: payload,
-          }
-        ),
+        request(`/api/admin/photo/models/categories/${categoryId}/subcategories`, { method: "POST", token, body: payload }),
 
       deleteSubcategory: (token, id) =>
-        request(`/api/admin/photo/models/subcategories/${id}`, {
-          method: "DELETE",
-          token,
-        }),
+        request(`/api/admin/photo/models/subcategories/${id}`, { method: "DELETE", token }),
 
       createItem: (token, subId, payload) =>
-        request(`/api/admin/photo/models/subcategories/${subId}/items`, {
-          method: "POST",
-          token,
-          body: payload,
-        }),
+        request(`/api/admin/photo/models/subcategories/${subId}/items`, { method: "POST", token, body: payload }),
 
       updateItem: (token, id, payload) =>
-        request(`/api/admin/photo/models/items/${id}`, {
-          method: "PUT",
-          token,
-          body: payload,
-        }),
+        request(`/api/admin/photo/models/items/${id}`, { method: "PUT", token, body: payload }),
 
       deleteItem: (token, id) =>
-        request(`/api/admin/photo/models/items/${id}`, {
-          method: "DELETE",
-          token,
-        }),
+        request(`/api/admin/photo/models/items/${id}`, { method: "DELETE", token }),
     },
 
     // ===== GENERATION ENDPOINTS =====
@@ -422,31 +301,21 @@ export const api = {
         body: { photo_url, level },
       }),
 
-    generateVideo: (
-      token,
-      {
-        photo_url,
-        prompt,
-        duration = 5,
-        resolution = "1280x720",
-        model = "grok/minimax-2.5",
-        translate_to_en = true,
-      }
-    ) =>
+    generateVideo: (token, { photo_url, prompt, plan_key, translate_to_en = true }) =>
       request("/api/photo/generate/video", {
         method: "POST",
         token,
-        body: {
-          photo_url,
-          prompt,
-          duration,
-          resolution,
-          model,
-          translate_to_en,
-        },
+        body: { photo_url, prompt, plan_key, translate_to_en },
       }),
 
-    // 🔹 MUHIM: uploadPhoto – backenddagi /api/photo/upload bilan ishlaydi
+    generateNormalize: (token, payload) =>
+      request("/api/photo/generate/normalize", {
+        method: "POST",
+        token,
+        body: payload,
+      }),
+
+    // ===== FILE MANAGEMENT =====
     uploadPhoto: (token, file) => {
       const form = new FormData();
       form.append("file", file);

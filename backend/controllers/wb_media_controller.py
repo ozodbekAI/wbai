@@ -1,4 +1,5 @@
 # controllers/wb_media_controller.py
+
 from typing import List, Dict, Any
 from fastapi import UploadFile, HTTPException
 from repositories.wb_repository import WBRepository
@@ -39,9 +40,9 @@ class WBMediaController:
         # 2) frontenddan kelgan final_photos ichidan URL larni olish
         final_urls: List[str] = []
         for p in final_photos:
-          # { "url": "...", "order": 1 }
-          if isinstance(p, dict) and "url" in p and p["url"]:
-              final_urls.append(p["url"])
+            # { "url": "...", "order": 1 }
+            if isinstance(p, dict) and "url" in p and p["url"]:
+                final_urls.append(p["url"])
 
         # 3) yangi yuklangan rasmlar URLlarini oxiriga qo‘shamiz
         final_urls.extend(uploaded_urls)
