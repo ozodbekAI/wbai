@@ -155,7 +155,7 @@ export const api = {
         request("/api/photo/generated", {
           method: "DELETE",
           token,
-          params: { file_name },
+          params: { file_name },      // backend kutayotgan parametr nomi
         }),
     },
 
@@ -327,9 +327,10 @@ export const api = {
     },
 
     deleteFile: (token, fileName) =>
-      request(`/api/photo/files/${encodeURIComponent(fileName)}`, {
+      request("/api/photo/generated", {
         method: "DELETE",
         token,
+        params: { file_name: fileName },
       }),
   },
 };

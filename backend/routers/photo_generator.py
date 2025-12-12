@@ -64,18 +64,15 @@ class NormalizeGenerateRequest(BaseModel):
     # new_model
     photo_url: Optional[str] = None
     model_item_id: Optional[int] = None
-
-
+    
 class PhotoGenerationResponse(BaseModel):
-    image_base64: str
-    file_name: Optional[str] = None   
-    file_url: Optional[str] = None    
+    file_name: str           # relative path: photos/xxx.png
+    file_url: str   
 
 
 class VideoGenerationResponse(BaseModel):
-    video_base64: str
-    file_name: Optional[str] = None   # relative path: videos/xxx.mp4
-    file_url: Optional[str] = None    # full URL: https://.../media/videos/xxx.mp4
+    file_name: str           # relative path: videos/xxx.mp4
+    file_url: str     # full URL: https://.../media/videos/xxx.mp4
 
 
 class GeneratedItem(BaseModel):
@@ -229,10 +226,8 @@ async def generate_scene(
 
         image_bytes = result["image"]
         rel_path = save_generated_file(image_bytes, kind="image")
-        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
         return PhotoGenerationResponse(
-            image_base64=image_base64,
             file_name=rel_path,
             file_url=get_file_url(rel_path),
         )
@@ -240,7 +235,7 @@ async def generate_scene(
     except Exception as e:
         logger.error(f"Scene generation error: {e}")
         raise HTTPException(500, str(e))
-
+    
 
 # ===== POSE GENERATION =====
 
@@ -261,10 +256,8 @@ async def generate_pose(
 
         image_bytes = result["image"]
         rel_path = save_generated_file(image_bytes, kind="image")
-        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
         return PhotoGenerationResponse(
-            image_base64=image_base64,
             file_name=rel_path,
             file_url=get_file_url(rel_path),
         )
@@ -287,10 +280,8 @@ async def generate_custom(
 
         image_bytes = result["image"]
         rel_path = save_generated_file(image_bytes, kind="image")
-        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
         return PhotoGenerationResponse(
-            image_base64=image_base64,
             file_name=rel_path,
             file_url=get_file_url(rel_path),
         )
@@ -312,10 +303,8 @@ async def enhance_photo(
 
         image_bytes = result["image"]
         rel_path = save_generated_file(image_bytes, kind="image")
-        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
         return PhotoGenerationResponse(
-            image_base64=image_base64,
             file_name=rel_path,
             file_url=get_file_url(rel_path),
         )
@@ -345,10 +334,8 @@ async def generate_video(
 
         video_bytes = result["video"]
         rel_path = save_generated_file(video_bytes, kind="video")
-        video_base64 = base64.b64encode(video_bytes).decode("utf-8")
 
         return VideoGenerationResponse(
-            video_base64=video_base64,
             file_name=rel_path,
             file_url=get_file_url(rel_path),
         )
@@ -407,15 +394,6 @@ async def generate_normalize(
     db: Session = Depends(get_db_dependency),
     user: dict = Depends(get_current_user),
 ):
-    """
-    mode = "own_model":
-        - photo_url_1: item
-        - photo_url_2: model
-
-    mode = "new_model":
-        - photo_url: item
-        - model_item_id: tipaj ID (DB dan prompt olib ishlatiladi)
-    """
     try:
         if request.mode == "own_model":
             if not request.photo_url_1 or not request.photo_url_2:
@@ -458,10 +436,8 @@ async def generate_normalize(
 
         image_bytes = result["image"]
         rel_path = save_generated_file(image_bytes, kind="image")
-        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
 
         return PhotoGenerationResponse(
-            image_base64=image_base64,
             file_name=rel_path,
             file_url=get_file_url(rel_path),
         )
@@ -471,3 +447,4 @@ async def generate_normalize(
     except Exception as e:
         logger.error(f"Normalize generation error: {e}")
         raise HTTPException(500, str(e))
+
