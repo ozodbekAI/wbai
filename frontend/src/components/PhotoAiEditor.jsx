@@ -827,14 +827,6 @@ export default function PhotoStudio({
                   </button>
                 </div>
               )}
-              {cardPhotos.length > 1 && (
-                <button
-                  onClick={handleSaveOrder}
-                  className="w-full mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2"
-                >
-                  <Save className="w-4 h-4" /> Saqlash va backendga yuborish
-                </button>
-              )}
             </div>
           )}
 
@@ -1347,14 +1339,6 @@ export default function PhotoStudio({
                   "🚀 Сгенерировать"
                 )}
               </button>
-              {isStandalone && (
-                <button
-                  onClick={handleSaveOrder}
-                  className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2"
-                >
-                  <Save className="w-4 h-4" /> Saqlash
-                </button>
-              )}
             </div>
           </div>
 
@@ -1374,7 +1358,7 @@ export default function PhotoStudio({
             {generatedPhotos.length ? (
               <>
                 <div className="mb-6">
-                  <h4 className="text-xs font-semibold text-gray-600 mb-2">Расмлар</h4>
+                  <h4 className="text-xs font-semibold text-gray-600 mb-2">Изображения</h4>
                   <div className="grid grid-cols-2 gap-2">
                     {generatedImages.map((photo) => {
                       const url = photo.fileUrl || photo.url;
@@ -1425,7 +1409,7 @@ export default function PhotoStudio({
                 </div>
 
                 <div>
-                  <h4 className="text-xs font-semibold text-gray-600 mb-2">Видеолар</h4>
+                  <h4 className="text-xs font-semibold text-gray-600 mb-2">Видео</h4>
                   <div className="grid grid-cols-2 gap-2">
                     {generatedVideos.map((photo) => {
                       const url = photo.fileUrl || photo.url;
@@ -1519,7 +1503,6 @@ export default function PhotoStudio({
             Перетащите фото из правой колонки влево
           </span>
           <span className="flex items-center gap-2">
-            <span>💾 Автосохранение</span>
           </span>
         </div>
       </div>
