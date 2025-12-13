@@ -134,7 +134,7 @@ export const api = {
   // ===== VIDEO API =====
   video: {
     getScenarios: (token) =>
-      request("/api/video/scenarios", {
+      request("/api/video/scenarios/", {
         method: "GET",
         token,
       }),
