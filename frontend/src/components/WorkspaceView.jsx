@@ -36,6 +36,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const [cardPhotos, setCardPhotos] = useState([]);
   const [article, setArticle] = useState("");
   const [error, setError] = useState("");
+  const [photoStudioMode, setPhotoStudioMode] = useState(null);
 
   const [processingCurrent, setProcessingCurrent] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -59,6 +60,10 @@ export default function WorkspaceView({ token, username, onLogout }) {
     height: card?.dimensions?.height || "",
   });
   const [sizes, setSizes] = useState(card?.sizes || []);
+
+  const handleOpenPhotoStudioStandalone = () => {
+    setPhotoStudioMode("standalone");
+  };
 
   // DIMENSIONS UPDATE STATE
   const [processingDimensions, setProcessingDimensions] = useState(false);
@@ -100,8 +105,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const [historyStats, setHistoryStats] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  const handleOpenPhotoStudio = () => setPhotoStudioOpen(true);
-  const handleClosePhotoStudio = () => setPhotoStudioOpen(false);
 
   const handleUpdateCardPhotos = (newPhotos) => {
     setCardPhotos(newPhotos);
@@ -112,7 +115,6 @@ export default function WorkspaceView({ token, username, onLogout }) {
   const [photoTemplatesOpen, setPhotoTemplatesOpen] = useState(false);
 
   // PHOTO STUDIO (AI modal)
-  const [photoStudioOpen, setPhotoStudioOpen] = useState(false);
   const fileInputRef = useRef(null);
 
   const pushLog = (msg) => {
@@ -610,7 +612,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
         onLogout={onLogout}
         onOpenPrompts={() => setPromptsOpen(true)}
         onOpenPhotoSettings={() => setPhotoTemplatesOpen(true)}
-        onOpenPhotoStudio={handleOpenPhotoStudio} // NEW
+        onOpenPhotoStudio={handleOpenPhotoStudioStandalone}
         onDownloadExcel={() => console.log("Download Excel")}
       />
 
@@ -736,7 +738,7 @@ export default function WorkspaceView({ token, username, onLogout }) {
             <PhotosGrid
               photos={cardPhotos}
               videoUrl={cardVideo}
-              onGenerate={() => setPhotoStudioOpen(true)}
+              onGenerate={() => setPhotoStudioMode("card")}
               onReorder={(newOrder) => setCardPhotos(newOrder)}
               onSaveOrder={savePhotoOrderToWB}
             />
@@ -774,8 +776,9 @@ export default function WorkspaceView({ token, username, onLogout }) {
                   finalValues={finalCharValues}
                   onChangeFinalValue={handleChangeFinalChar}
                   token={token}
+                  conditionalSkipFields={result.conditional_skip_fields || []}
                 />
-              </>
+                </>
             )}
 
             <LogsPanel logs={logs} />
@@ -819,18 +822,27 @@ export default function WorkspaceView({ token, username, onLogout }) {
         token={token}
       />
 
-      {/* PHOTO AI EDITOR MODAL */}
-      {photoStudioOpen && (
+      {photoStudioMode === "standalone" && (
+        <PhotoStudio
+          token={token}
+          isStandalone={true}
+          onClose={() => setPhotoStudioMode(null)}
+        />
+      )}
+
+      {photoStudioMode === "card" && (
         <PhotoStudio
           token={token}
           cardPhotos={cardPhotos}
           onUpdateCardPhotos={handleUpdateCardPhotos}
-          onClose={handleClosePhotoStudio}
-          // PROPS: give card and cardVideo to studio so it can validate video / normalize logic
           card={card}
           cardVideo={cardVideo}
+          onUpdateCardVideo={setCardVideo}
+          isStandalone={false}
+          onClose={() => setPhotoStudioMode(null)}
         />
       )}
+      
     </div>
   );
 }
