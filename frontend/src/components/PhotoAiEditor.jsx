@@ -49,7 +49,7 @@ const VIDEO_PLANS = [
   },
 ];
 
-const GENERATED_PAGE_SIZE = 20; // paginatsiya uchun
+const GENERATED_PAGE_SIZE = 20;
 
 function getUrl(item) {
   if (!item) return "";
@@ -65,16 +65,15 @@ export default function PhotoStudio({
   card = null,
   cardVideo = null,
   onUpdateCardVideo,
+  isStandalone = false, // NEW: Standalone mode for "Раски" button
 }) {
   const [activeTab, setActiveTab] = useState("scene");
   const [loading, setLoading] = useState(false);
 
   const [selectedCardIndex, setSelectedCardIndex] = useState(0);
 
-  // ✅ O'RTADAGI AKТIV MEDIA (generate shuni ustida bo'ladi)
   const [activeMedia, setActiveMedia] = useState(null);
 
-  // Generated (o'ng taraf) – backend history + yangi generate’lar
   const [generatedPhotos, setGeneratedPhotos] = useState([]);
   const [genOffset, setGenOffset] = useState(0);
   const [genHasMore, setGenHasMore] = useState(true);
@@ -84,10 +83,8 @@ export default function PhotoStudio({
   const fileInputRef = useRef(null);
   const centerFileInputRef = useRef(null);
 
-  // Custom tab uchun
   const [customPrompt, setCustomPrompt] = useState("");
 
-  // Scene
   const [sceneCategories, setSceneCategories] = useState([]);
   const [sceneSubcats, setSceneSubcats] = useState([]);
   const [sceneItems, setSceneItems] = useState([]);
@@ -95,7 +92,6 @@ export default function PhotoStudio({
   const [selectedSubcat, setSelectedSubcat] = useState("");
   const [selectedItem, setSelectedItem] = useState("");
 
-  // Pose
   const [poseGroups, setPoseGroups] = useState([]);
   const [poseSubgroups, setPoseSubgroups] = useState([]);
   const [posePrompts, setPosePrompts] = useState([]);
@@ -103,7 +99,6 @@ export default function PhotoStudio({
   const [selectedPoseSubgroup, setSelectedPoseSubgroup] = useState("");
   const [selectedPrompt, setSelectedPrompt] = useState("");
 
-  // Video
   const [selectedVideoPlanKey, setSelectedVideoPlanKey] = useState("");
   const [videoScenarios, setVideoScenarios] = useState([]);
   const [selectedVideoScenarioId, setSelectedVideoScenarioId] = useState(null);
@@ -111,9 +106,8 @@ export default function PhotoStudio({
   const [videoPrompt, setVideoPrompt] = useState("");
   const [loadingScenarios, setLoadingScenarios] = useState(false);
 
-  // Normalize
-  const [normalizeMode, setNormalizeMode] = useState(""); // "own" | "new"
-  const [normalizePhotos, setNormalizePhotos] = useState([]); // max 2 photos
+  const [normalizeMode, setNormalizeMode] = useState("");
+  const [normalizePhotos, setNormalizePhotos] = useState([]);
   const [modelCategories, setModelCategories] = useState([]);
   const [modelSubcategories, setModelSubcategories] = useState([]);
   const [modelItems, setModelItems] = useState([]);
@@ -121,21 +115,18 @@ export default function PhotoStudio({
   const [selectedModelSubcat, setSelectedModelSubcat] = useState("");
   const [selectedModelItem, setSelectedModelItem] = useState("");
 
-  // ✅ cardPhotos o'zgarsa, activeMedia yo'q bo'lsa - birinchisini o'rtaga qo'yamiz
   useEffect(() => {
-    if (!activeMedia && cardPhotos?.length) {
+    if (!activeMedia && cardPhotos?.length && !isStandalone) {
       setActiveMedia(cardPhotos[0]);
       setSelectedCardIndex(0);
     }
 
-    if (cardPhotos?.length && selectedCardIndex >= cardPhotos.length) {
+    if (cardPhotos?.length && selectedCardIndex >= cardPhotos.length && !isStandalone) {
       setSelectedCardIndex(0);
       setActiveMedia(cardPhotos[0]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cardPhotos]);
+  }, [cardPhotos, isStandalone]);
 
-  // ✅ Backend’dan generated history ni GET qilish + paginatsiya
   async function loadGenerated(reset = false) {
     if (!token) return;
     if (genLoading) return;
@@ -175,16 +166,13 @@ export default function PhotoStudio({
     }
   }
 
-  // Modal ochilganda / token o'zgarganda – history ni qayta yuklash
   useEffect(() => {
     if (!token) return;
     setGenOffset(0);
     setGenHasMore(true);
     loadGenerated(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // Tabs bo'yicha ma'lumotlarni yuklash
   useEffect(() => {
     if (!token) return;
 
@@ -203,7 +191,6 @@ export default function PhotoStudio({
     }
 
     if (activeTab === "video") {
-      // Reset video state
       setSelectedVideoPlanKey("");
       setSelectedVideoScenarioId(null);
       setUseCustomVideoPrompt(false);
@@ -212,7 +199,6 @@ export default function PhotoStudio({
     }
 
     if (activeTab === "normalize") {
-      // Reset normalize state
       setNormalizeMode("");
       setNormalizePhotos([]);
       setModelCategories([]);
@@ -224,7 +210,6 @@ export default function PhotoStudio({
     }
   }, [activeTab, token]);
 
-  // Video plan tanlanganda scenariolarni yuklash
   const handleSelectVideoPlan = async (planKey) => {
     setSelectedVideoPlanKey(planKey);
     setSelectedVideoScenarioId(null);
@@ -234,7 +219,6 @@ export default function PhotoStudio({
 
     try {
       setLoadingScenarios(true);
-      // admin-endpoint должен отдавать список сценариев с prompt
       const scenarios = await api.video.getScenarios(token);
       setVideoScenarios(scenarios || []);
     } catch (e) {
@@ -301,7 +285,6 @@ export default function PhotoStudio({
     }
   };
 
-  // Normalize functions
   const handleSelectNormalizeMode = async (mode) => {
     setNormalizeMode(mode);
     setNormalizePhotos([]);
@@ -310,7 +293,6 @@ export default function PhotoStudio({
     setSelectedModelItem("");
 
     if (mode === "new") {
-      // Load model categories for "new model" mode
       try {
         const cats = await api.photo.models.listCategories(token);
         setModelCategories(cats || []);
@@ -367,7 +349,6 @@ export default function PhotoStudio({
   const handleGenerate = async () => {
     if (!token) return;
 
-    // ✅ Generate endi o'rtadagi activeMedia ustida bo'ladi
     const activeItem = activeMedia;
     if (!activeItem) {
       alert("Выберите фото слева или справа");
@@ -422,9 +403,8 @@ export default function PhotoStudio({
           prompt: customPrompt,
         });
       } else if (activeTab === "video") {
-        // Дополнительная проверка: если карточка обязана иметь video — предупредить
-        if (!cardVideo) {
-          if (!window.confirm("В карточке нет видео. Продолжить создание видео?")) {
+        if (!isStandalone && cardVideo) {
+          if (!window.confirm("Заменить существующее видео в карточке? (Только одно видео разрешено)")) {
             setLoading(false);
             return;
           }
@@ -462,7 +442,6 @@ export default function PhotoStudio({
             setLoading(false);
             return;
           }
-          // scenario.prompt должен поступить с бэкенда (админ задаёт)
           promptToSend = scenario.prompt || scenario.description || scenario.name;
         }
 
@@ -479,7 +458,6 @@ export default function PhotoStudio({
         }
 
         if (normalizeMode === "own") {
-          // Режим "Свой фотомодель" - нужно 2 фото
           if (normalizePhotos.length < 2) {
             alert("Добавьте 2 фото: изделие и модель");
             setLoading(false);
@@ -496,7 +474,6 @@ export default function PhotoStudio({
                 .file_url
             : getUrl(normalizePhotos[1]);
 
-          // optionally: use admin prompt for own_model if exists
           let ownPrompt = null;
           try {
             const p = await api.prompts.get(token, "normalize_own");
@@ -509,10 +486,9 @@ export default function PhotoStudio({
             mode: "own_model",
             photo_url_1: photo1Url,
             photo_url_2: photo2Url,
-            prompt: ownPrompt, // backend may accept optional prompt
+            prompt: ownPrompt,
           });
         } else if (normalizeMode === "new") {
-          // Режим "Новый фотомодель" - нужно 1 фото + выбранная модель
           if (normalizePhotos.length < 1) {
             alert("Добавьте фото изделия");
             setLoading(false);
@@ -530,7 +506,6 @@ export default function PhotoStudio({
                 .file_url
             : getUrl(normalizePhotos[0]);
 
-          // get selected model item prompt (modelItems contain prompt if admin provided)
           const modelItem = modelItems.find((i) => i.id === Number(selectedModelItem));
           const modelPrompt = modelItem?.prompt || null;
 
@@ -538,7 +513,6 @@ export default function PhotoStudio({
             mode: "new_model",
             photo_url: photoUrl,
             model_item_id: Number(selectedModelItem),
-            // optionally send modelPrompt; backend will use model repository prompt if needed
             prompt: modelPrompt,
           });
         }
@@ -546,20 +520,19 @@ export default function PhotoStudio({
 
       const newItem = {
         id: Date.now(),
-        url: data.file_url,          // <-- data.image_base64 emas
+        url: data.file_url,
         type: activeTab === "video" ? "video" : "image",
         timestamp: new Date().toISOString(),
         fileName: data.file_name,
         fileUrl: data.file_url,
       };
 
-      // ✅ yangi generate qilingan rasmlarni ham o'ng tarafga qo'shamiz (yuqoriga)
       setGeneratedPhotos((prev) => [newItem, ...prev]);
-      if (activeTab === "video") {
-        if (cardVideo && !window.confirm("Заменить существующее видео в карточке?")) {
-          return;
+
+      if (!isStandalone) {
+        if (activeTab === "video") {
+          onUpdateCardVideo && onUpdateCardVideo(newItem.url);
         }
-        onUpdateCardVideo && onUpdateCardVideo(newItem.url);
       }
     } catch (e) {
       console.error(e);
@@ -592,7 +565,6 @@ export default function PhotoStudio({
 
     try {
       if (!photo.fileName) {
-        // try to derive fileName from fileUrl
         const maybe = (photo.fileUrl || photo.url || "").split("/media/").pop();
         if (maybe) photo.fileName = maybe;
       }
@@ -623,13 +595,19 @@ export default function PhotoStudio({
       file: f,
       isNew: true,
     }));
-    const newList = [...cardPhotos, ...newItems];
-    onUpdateCardPhotos && onUpdateCardPhotos(newList);
-
-    const first = newItems[0] || null;
-    if (first) {
-      setActiveMedia(first);
-      setSelectedCardIndex(cardPhotos.length);
+    if (!isStandalone) {
+      const newList = [...cardPhotos, ...newItems];
+      onUpdateCardPhotos && onUpdateCardPhotos(newList);
+      const first = newItems[0] || null;
+      if (first) {
+        setActiveMedia(first);
+        setSelectedCardIndex(cardPhotos.length);
+      }
+    } else {
+      const first = newItems[0] || null;
+      if (first) {
+        setActiveMedia(first);
+      }
     }
   };
 
@@ -644,7 +622,10 @@ export default function PhotoStudio({
     try {
       const photo = JSON.parse(dataStr);
       if (photo.type === "video") {
-        if (cardVideo && !window.confirm("Заменить существующее видео?")) return;
+        if (cardVideo) {
+          alert("Только одно видео разрешено в карточке");
+          return;
+        }
         onUpdateCardVideo && onUpdateCardVideo(photo.fileUrl || photo.url);
       } else {
         onUpdateCardPhotos && onUpdateCardPhotos([
@@ -667,8 +648,6 @@ export default function PhotoStudio({
 
   const handleSaveOrder = async () => {
     try {
-      // Yangi tartib va yangi rasmlar/video ni backendga yuborish
-      // Misol: api.card.updateMedia(token, card.id, { photos: cardPhotos, video: cardVideo });
       alert("Тартиб сақланди ва backendга юборилди!");
     } catch (e) {
       alert("Хатолик: " + e.message);
@@ -695,10 +674,12 @@ export default function PhotoStudio({
 
   const activeCardUrl = getUrl(activeMedia);
 
+  const generatedImages = generatedPhotos.filter((p) => p.type !== "video");
+  const generatedVideos = generatedPhotos.filter((p) => p.type === "video");
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-[95vw] h-[90vh] flex flex-col">
-        {/* HEADER */}
         <div className="px-6 py-4 border-b flex items-center justify-between bg-gradient-to-r from-violet-50 via-purple-50 to-pink-50">
           <div>
             <h2 className="text-xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
@@ -731,135 +712,133 @@ export default function PhotoStudio({
           </div>
         </div>
 
-        {/* BODY */}
         <div className="flex-1 grid grid-cols-12 gap-4 p-4 overflow-hidden">
-          {/* LEFT: Card Photos */}
-          <div
-            className="col-span-3 border-r border-gray-200 pr-3 overflow-y-auto"
-            onDrop={handleDropToCard}
-            onDragOver={(e) => e.preventDefault()}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-gray-700">
-                📦 Фото карточки
-              </h3>
-              <span className="text-xs bg-violet-100 text-violet-700 px-2 py-1 rounded-full">
-                {cardPhotos.length}
-              </span>
-            </div>
-
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full text-xs px-3 py-2 mb-3 rounded-lg border-2 border-dashed border-violet-300 text-violet-700 hover:bg-violet-50 hover:border-violet-400 transition flex items-center justify-center gap-2"
+          {!isStandalone && (
+            <div
+              className="col-span-3 border-r border-gray-200 pr-3 overflow-y-auto"
+              onDrop={handleDropToCard}
+              onDragOver={(e) => e.preventDefault()}
             >
-              <Upload className="w-4 h-4" />
-              Загрузить с компьютера
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(e) => handleUploadToCard(e.target.files)}
-            />
-
-            {cardPhotos.length ? (
-              <div className="grid grid-cols-2 gap-2">
-                {cardPhotos.map((item, idx) => {
-                  const url = getUrl(item);
-                  return (
-                    <div
-                      key={idx}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, idx)}
-                      onDragOver={handleDragOver}
-                      onDrop={(e) => handleDrop(e, idx)}
-                      onClick={() => {
-                        setSelectedCardIndex(idx);
-                        setActiveMedia(item); // chapdan tanlansa ham o'rtaga chiqadi
-                      }}
-                      className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all group ${
-                        idx === selectedCardIndex
-                          ? "border-violet-500 ring-4 ring-violet-200 scale-105"
-                          : "border-gray-200 hover:border-violet-300"
-                      }`}
-                    >
-                      <img
-                        src={url}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                      {item.isNew && (
-                        <span className="absolute top-1 left-1 bg-emerald-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
-                          NEW
-                        </span>
-                      )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteFromCard(idx);
-                        }}
-                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-xs text-gray-400 text-center mt-8 p-4 border-2 border-dashed border-gray-200 rounded-lg">
-                <Upload className="w-8 h-8 mx-auto mb-2 text-gray-300" />
-                <p>
-                  Перетащите сюда
-                  <br />
-                  фото справа или
-                  <br />
-                  загрузите новые
-                </p>
-              </div>
-            )}
-            {cardVideo && (
-              <div className="relative aspect-video rounded-lg overflow-hidden cursor-pointer border-2 transition-all group mt-4" onClick={() => setActiveMedia({url: cardVideo, type: 'video'})}>
-                <video
-                  src={cardVideo}
-                  className="w-full h-full object-cover"
-                  controls={false}
-                />
-                <span className="absolute top-1 left-1 bg-purple-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
-                  VIDEO
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-gray-700">
+                  📦 Фото карточки
+                </h3>
+                <span className="text-xs bg-violet-100 text-violet-700 px-2 py-1 rounded-full">
+                  {cardPhotos.length}
                 </span>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm("Удалить видео из карточки?")) {
-                      onUpdateCardVideo && onUpdateCardVideo(null);
-                      if (getUrl(activeMedia) === cardVideo) {
-                        setActiveMedia(cardPhotos[0] || null);
-                        setSelectedCardIndex(0);
-                      }
-                    }
-                  }}
-                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </button>
               </div>
-            )}
-            {cardPhotos.length > 1 && (
-              <button
-                onClick={handleSaveOrder}
-                className="w-full mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2"
-              >
-                <Save className="w-4 h-4" /> Saqlash va backendga yuborish
-              </button>
-            )}
-          </div>
 
-          {/* CENTER: Preview + Controls */}
-          <div className="col-span-6 flex flex-col gap-3 overflow-y-auto">
-            {/* Preview */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full text-xs px-3 py-2 mb-3 rounded-lg border-2 border-dashed border-violet-300 text-violet-700 hover:bg-violet-50 hover:border-violet-400 transition flex items-center justify-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                Загрузить с компьютера
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => handleUploadToCard(e.target.files)}
+              />
+
+              {cardPhotos.length ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {cardPhotos.map((item, idx) => {
+                    const url = getUrl(item);
+                    return (
+                      <div
+                        key={idx}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, idx)}
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDrop(e, idx)}
+                        onClick={() => {
+                          setSelectedCardIndex(idx);
+                          setActiveMedia(item);
+                        }}
+                        className={`relative aspect-square rounded-lg overflow-hidden cursor-pointer border-2 transition-all group ${
+                          idx === selectedCardIndex
+                            ? "border-violet-500 ring-4 ring-violet-200 scale-105"
+                            : "border-gray-200 hover:border-violet-300"
+                        }`}
+                      >
+                        <img
+                          src={url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                        {item.isNew && (
+                          <span className="absolute top-1 left-1 bg-emerald-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
+                            NEW
+                          </span>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteFromCard(idx);
+                          }}
+                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400 text-center mt-8 p-4 border-2 border-dashed border-gray-200 rounded-lg">
+                  <Upload className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                  <p>
+                    Перетащите сюда
+                    <br />
+                    фото справа или
+                    <br />
+                    загрузите новые
+                  </p>
+                </div>
+              )}
+              {cardVideo && (
+                <div className="relative aspect-video rounded-lg overflow-hidden cursor-pointer border-2 transition-all group mt-4" onClick={() => setActiveMedia({url: cardVideo, type: 'video'})}>
+                  <video
+                    src={cardVideo}
+                    className="w-full h-full object-cover"
+                    controls={false}
+                  />
+                  <span className="absolute top-1 left-1 bg-purple-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
+                    VIDEO
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm("Удалить видео из карточки?")) {
+                        onUpdateCardVideo && onUpdateCardVideo(null);
+                        if (getUrl(activeMedia) === cardVideo) {
+                          setActiveMedia(cardPhotos[0] || null);
+                          setSelectedCardIndex(0);
+                        }
+                      }
+                    }}
+                    className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              {cardPhotos.length > 1 && (
+                <button
+                  onClick={handleSaveOrder}
+                  className="w-full mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2"
+                >
+                  <Save className="w-4 h-4" /> Saqlash va backendga yuborish
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className={`${isStandalone ? "col-span-6" : "col-span-6"} flex flex-col gap-3 overflow-y-auto`}>
             <div className="relative flex-1 bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden min-h-[250px]">
               {activeCardUrl ? (
                 <>
@@ -915,7 +894,6 @@ export default function PhotoStudio({
               />
             </div>
 
-            {/* Controls */}
             <div className="space-y-3 bg-gradient-to-br from-white to-gray-50 rounded-xl border border-gray-200 p-4 shadow-sm">
               {activeTab === "scene" && (
                 <>
@@ -1019,7 +997,6 @@ export default function PhotoStudio({
 
               {activeTab === "normalize" && (
                 <div className="space-y-4">
-                  {/* РЕЖИМ ВЫБОРА */}
                   {!normalizeMode && (
                     <div>
                       <label className="block text-sm font-semibold text-gray-800 mb-3">
@@ -1053,7 +1030,6 @@ export default function PhotoStudio({
                     </div>
                   )}
 
-                  {/* РЕЖИМ ВЫБРАН */}
                   {normalizeMode && (
                     <>
                       <div className="flex items-center justify-between p-3 bg-indigo-50 rounded-lg border border-indigo-200">
@@ -1079,14 +1055,12 @@ export default function PhotoStudio({
                         </button>
                       </div>
 
-                      {/* Фото для нормализации */}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           📸 Добавьте фото
                           {normalizeMode === "own" ? " (2 шт)" : " (1 шт)"}
                         </label>
 
-                        {/* Показать уже добавленные фото */}
                         {normalizePhotos.length > 0 && (
                           <div className="grid grid-cols-2 gap-2 mb-2">
                             {normalizePhotos.map((photo, idx) => (
@@ -1113,7 +1087,6 @@ export default function PhotoStudio({
                           </div>
                         )}
 
-                        {/* Кнопка добавления фото */}
                         {((normalizeMode === "own" && normalizePhotos.length < 2) ||
                           (normalizeMode === "new" && normalizePhotos.length < 1)) && (
                           <button
@@ -1134,7 +1107,6 @@ export default function PhotoStudio({
                         )}
                       </div>
 
-                      {/* Если режим "new" - выбор модели */}
                       {normalizeMode === "new" && normalizePhotos.length > 0 && (
                         <>
                           <select
@@ -1375,12 +1347,19 @@ export default function PhotoStudio({
                   "🚀 Сгенерировать"
                 )}
               </button>
+              {isStandalone && (
+                <button
+                  onClick={handleSaveOrder}
+                  className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center justify-center gap-2"
+                >
+                  <Save className="w-4 h-4" /> Saqlash
+                </button>
+              )}
             </div>
           </div>
 
-          {/* RIGHT: Generated */}
           <div
-            className="col-span-3 border-l border-gray-200 pl-3 overflow-y-auto"
+            className={`${isStandalone ? "col-span-6" : "col-span-3"} border-l border-gray-200 pl-3 overflow-y-auto`}
             ref={generatedRef}
           >
             <div className="flex items-center justify-between mb-3">
@@ -1394,71 +1373,114 @@ export default function PhotoStudio({
 
             {generatedPhotos.length ? (
               <>
-                <div className="grid grid-cols-2 gap-2">
-                  {generatedPhotos.map((photo) => {
-                    const url = photo.fileUrl || photo.url;
-                    const timestamp = photo.timestamp
-                      ? new Date(photo.timestamp).toLocaleString("ru-RU")
-                      : "";
+                <div className="mb-6">
+                  <h4 className="text-xs font-semibold text-gray-600 mb-2">Расмлар</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    {generatedImages.map((photo) => {
+                      const url = photo.fileUrl || photo.url;
+                      const timestamp = photo.timestamp
+                        ? new Date(photo.timestamp).toLocaleString("ru-RU")
+                        : "";
 
-                    return (
-                      <div
-                        key={photo.id}
-                        draggable
-                        onDragStart={(e) => handleDragFromGenerated(e, photo)}
-                        onClick={() => {
-                          setActiveMedia({
-                            url,
-                            type: photo.type || "image",
-                            fileName: photo.fileName || null,
-                            fileUrl: photo.fileUrl || null,
-                            fromGenerated: true,
-                          });
-                        }}
-                        className="relative aspect-square rounded-lg overflow-hidden border-2 border-green-200 hover:border-green-400 cursor-move transition-all group hover:scale-105 hover:shadow-lg"
-                      >
-                        {photo.type === "video" ? (
-                          <>
-                            <video
-                              src={url}
-                              className="w-full h-full object-cover"
-                              controls={false}
-                              muted
-                              playsInline
-                            />
-                            <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                              <Film className="w-8 h-8 text-white" />
-                            </div>
-                          </>
-                        ) : (
+                      return (
+                        <div
+                          key={photo.id}
+                          draggable
+                          onDragStart={(e) => handleDragFromGenerated(e, photo)}
+                          onClick={() => {
+                            setActiveMedia({
+                              url,
+                              type: photo.type || "image",
+                              fileName: photo.fileName || null,
+                              fileUrl: photo.fileUrl || null,
+                              fromGenerated: true,
+                            });
+                          }}
+                          className="relative aspect-square rounded-lg overflow-hidden border-2 border-green-200 hover:border-green-400 cursor-move transition-all group hover:scale-105 hover:shadow-lg"
+                        >
                           <img
                             src={url}
                             alt="generated"
                             className="w-full h-full object-cover"
                           />
-                        )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteGenerated(photo);
+                            }}
+                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow-lg"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
 
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteGenerated(photo);
-                          }}
-                          className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow-lg"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-
-                        {timestamp && (
-                          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent text-white text-[10px] px-2 py-1 opacity-0 group-hover:opacity-100 transition">
-                            {timestamp}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                          {timestamp && (
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent text-white text-[10px] px-2 py-1 opacity-0 group-hover:opacity-100 transition">
+                              {timestamp}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {/* PAGINATSIYA BUTTON */}
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-600 mb-2">Видеолар</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    {generatedVideos.map((photo) => {
+                      const url = photo.fileUrl || photo.url;
+                      const timestamp = photo.timestamp
+                        ? new Date(photo.timestamp).toLocaleString("ru-RU")
+                        : "";
+
+                      return (
+                        <div
+                          key={photo.id}
+                          draggable
+                          onDragStart={(e) => handleDragFromGenerated(e, photo)}
+                          onClick={() => {
+                            setActiveMedia({
+                              url,
+                              type: photo.type || "image",
+                              fileName: photo.fileName || null,
+                              fileUrl: photo.fileUrl || null,
+                              fromGenerated: true,
+                            });
+                          }}
+                          className="relative aspect-square rounded-lg overflow-hidden border-2 border-green-200 hover:border-green-400 cursor-move transition-all group hover:scale-105 hover:shadow-lg"
+                        >
+                          <video
+                            src={url}
+                            className="w-full h-full object-cover"
+                            controls={false}
+                            muted
+                            playsInline
+                          />
+                          <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                            <Film className="w-8 h-8 text-white" />
+                          </div>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteGenerated(photo);
+                            }}
+                            className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition shadow-lg"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+
+                          {timestamp && (
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent text-white text-[10px] px-2 py-1 opacity-0 group-hover:opacity-100 transition">
+                              {timestamp}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {genHasMore && (
                   <div className="mt-3 flex justify-center">
                     <button
@@ -1491,7 +1513,6 @@ export default function PhotoStudio({
           </div>
         </div>
 
-        {/* FOOTER */}
         <div className="px-6 py-3 border-t bg-gradient-to-r from-gray-50 to-gray-100 flex items-center justify-between text-xs text-gray-600">
           <span className="flex items-center gap-2">
             <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />

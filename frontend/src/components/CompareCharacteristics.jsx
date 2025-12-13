@@ -17,6 +17,7 @@ export default function CompareCharacteristics({
   finalValues = {},
   onChangeFinalValue,
   token,
+  conditionalSkipFields = [],
 }) {
   const renderVal = (v) =>
     Array.isArray(v) ? v.join(", ") : String(v ?? "");
@@ -27,6 +28,14 @@ export default function CompareCharacteristics({
     oldChars.forEach((c) => c?.name && names.add(c.name));
     return Array.from(names);
   }, [newChars, oldChars]);
+
+  const conditionalSkipNames = useMemo(
+    () => new Set(conditionalSkipFields.map((f) => f.name)),
+    [conditionalSkipFields]
+  );
+
+  const isConditionalSkip = (name) =>
+    conditionalSkipNames.has(name);
 
   const byName = (list) =>
     list.reduce((acc, c) => {
@@ -255,63 +264,77 @@ export default function CompareCharacteristics({
                           )}
                         </div>
 
-                        {/* Input + avto-dropdown */}
-                        <div className="relative">
-                          <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-300">
-                            <Search className="w-4 h-4 text-gray-400 ml-2" />
-                            <input
-                              className="flex-1 px-2 py-1.5 text-[11px] outline-none bg-transparent"
-                              placeholder="Введите значение..."
-                              value={drafts[name] || ""}
-                              onChange={(e) => handleInputChange(name, e.target.value)}
-                              onFocus={() => handleFocus(name)}
-                              onBlur={(e) => handleBlur(e, name)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  handleAddManual(name);
-                                }
-                              }}
-                            />
-                            {isLoadingDict && (
-                              <Loader2 className="w-4 h-4 animate-spin text-violet-600 mr-2" />
-                            )}
-                          </div>
 
-                          {/* Dropdown — faqat focus bo‘lganda */}
-                          {isDictOpen && (
-                            <div
-                              ref={(el) => (dropdownRefs.current[name] = el)}
-                              className="absolute top-full left-0 right-0 mt-1 border border-violet-200 bg-white rounded-xl shadow-xl max-h-56 overflow-y-auto z-20"
-                            >
-                              {keywords.length === 0 ? (
-                                <div className="px-4 py-3 text-[11px] text-gray-500">
-                                  {searchTerm.trim()
-                                    ? "Ничего не найдено"
-                                    : "Словарь загружается или пустой"}
-                                </div>
-                              ) : (
-                                keywords.map((val) => {
-                                  const isSelected = finalArr.includes(val);
-                                  return (
-                                    <button
-                                      key={val}
-                                      type="button"
-                                      onMouseDown={(e) => e.preventDefault()} // blur ni oldini olish
-                                      onClick={() => handleSelectKeyword(name, val)}
-                                      className={`w-full text-left px-4 py-2.5 text-[11px] hover:bg-violet-50 transition-colors flex items-center justify-between ${
-                                        isSelected ? "bg-violet-50" : ""
-                                      }`}
-                                    >
-                                      <span>{val}</span>
-                                      {isSelected && <Check className="w-3.5 h-3.5 text-violet-600" />}
-                                    </button>
-                                  );
-                                })
-                              )}
-                            </div>
+                      <div className="relative">
+                        {/* INFO TEXT faqat conditional_skip bo‘lsa */}
+                        {/* {isConditionalSkip(name) && (
+                          <div className="text-[11px] italic text-gray-400 mb-1">
+                            Поле заполняется автоматически по условиям
+                          </div>
+                        )} */}
+
+                        <div
+                          className={
+                            "flex items-center border rounded-lg overflow-hidden " +
+                            (isConditionalSkip(name)
+                              ? "bg-gray-100 border-gray-200 cursor-not-allowed"
+                              : "border-gray-300 focus-within:border-violet-500 focus-within:ring-1 focus-within:ring-violet-300")
+                          }
+                        >
+                          <Search className="w-4 h-4 text-gray-400 ml-2" />
+
+                          <input
+                            className={
+                              "flex-1 px-2 py-1.5 text-[11px] outline-none bg-transparent " +
+                              (isConditionalSkip(name) ? "cursor-not-allowed text-gray-500" : "")
+                            }
+                            placeholder={
+                              isConditionalSkip(name)
+                                ? "Автозаполнение по условиям"
+                                : "Введите значение..."
+                            }
+                            value={drafts[name] || ""}
+                            disabled={isConditionalSkip(name)}
+                            readOnly={isConditionalSkip(name)}
+                            onChange={(e) => handleInputChange(name, e.target.value)}
+                            onFocus={() => {
+                              if (!isConditionalSkip(name)) handleFocus(name);
+                            }}
+                            onBlur={(e) => handleBlur(e, name)}
+                            onKeyDown={(e) => {
+                              if (isConditionalSkip(name)) return;
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleAddManual(name);
+                              }
+                            }}
+                          />
+
+                          {isLoadingDict && !isConditionalSkip(name) && (
+                            <Loader2 className="w-4 h-4 animate-spin text-violet-600 mr-2" />
                           )}
                         </div>
+
+                        {/* DROPDOWN faqat oddiy fieldlar uchun */}
+                        {!isConditionalSkip(name) && isDictOpen && (
+                          <div
+                            ref={(el) => (dropdownRefs.current[name] = el)}
+                            className="absolute top-full left-0 right-0 mt-1 border border-violet-200 bg-white rounded-xl shadow-xl max-h-56 overflow-y-auto z-20"
+                          >
+                            {keywords.map((val) => (
+                              <button
+                                key={val}
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => handleSelectKeyword(name, val)}
+                                className="w-full text-left px-4 py-2.5 text-[11px] hover:bg-violet-50"
+                              >
+                                {val}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       </div>
                     </td>
                   </tr>

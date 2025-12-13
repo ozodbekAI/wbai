@@ -419,6 +419,8 @@ class PipelineService:
                 "new_title": wb_title_result["new_title"],
                 "new_description": wb_description_result["new_description"],
                 "new_characteristics": final_charcs,
+                
+                "conditional_skip_fields": conditional_skip,
 
                 "detected_colors": detected_colors,
 
