@@ -2,8 +2,23 @@
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-export async function request(path, { method = "GET", token, body, params } = {}) {
-  const urlObj = new URL(`${API_URL}${path}`);
+function normalizePath(path) {
+  if (
+    !path.endsWith("/") &&
+    !path.includes("?") &&
+    !path.match(/\/\d+$/)
+  ) {
+    return path + "/";
+  }
+  return path;
+}
+
+export async function request(
+  path,
+  { method = "GET", token, body, params } = {}
+) {
+  const normalizedPath = normalizePath(path);
+  const urlObj = new URL(`${API_URL}${normalizedPath}`);
 
   if (params && typeof params === "object") {
     Object.entries(params).forEach(([key, value]) => {
@@ -14,7 +29,7 @@ export async function request(path, { method = "GET", token, body, params } = {}
   }
 
   const headers = {};
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   const options = { method, headers };
 
@@ -36,8 +51,14 @@ export async function request(path, { method = "GET", token, body, params } = {}
   }
 
   if (!res.ok) {
-    throw new Error(data?.detail || data?.errorText || `HTTP ${res.status}`);
+    throw new Error(
+      data?.detail ||
+      data?.message ||
+      data?.error ||
+      `HTTP ${res.status}`
+    );
   }
+
   return data;
 }
 
